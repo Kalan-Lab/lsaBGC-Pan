@@ -1,2 +1,4 @@
-# lsaBGC-POW
-lsaBGC - suite for pan-BGC-omics - refined for easier installation and usage and introducing the pan-genome workflow (POW). 
+# *lsa*BGC-Pan
+*lsa*BGC-Pan - is the lsaBGC package reconfigured for easier installation via both Docker and Bioconda and featuring a simpler workflow bearing the same name. 
+
+
