@@ -5,4 +5,4 @@
 
 ### Manuscript
 
-> [Evolutionary investigations of the biosynthetic diversity in the skin microbiome using *lsa*BGC](https://www.microbiologyresearch.org/content/journal/mgen/10.1099/mgen.0.000988), *Microbial Genomics* 2023.<br>Salamzade R, Cheong JZA, Sandstrom S, Swaney MH, Stubbendieck RM, Lane Starr N, Currie CR, Singh AM, Kalan LR 
+> [Evolutionary investigations of the biosynthetic diversity in the skin microbiome using *lsa*BGC](https://www.microbiologyresearch.org/content/journal/mgen/10.1099/mgen.0.000988), *Microbial Genomics* 2023.<br>Salamzade R, Cheong JZA, Sandstrom S, Swaney MH,<br>Stubbendieck RM, Lane Starr N, Currie CR, Singh AM, Kalan LR 
