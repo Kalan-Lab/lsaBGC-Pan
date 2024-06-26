@@ -1,0 +1,45 @@
+name: lsaBGC-Pan
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - setuptools<=58.2.0
+  - pip=22.1.2
+  - conda-forge::cxx-compiler
+  - biopython=1.79
+  - pysam
+  - bioconda::mcl
+  - bioconda::pal2nal
+  - bioconda::hmmer
+  - bioconda::fasttree
+  - conda-forge::ete3
+  - bioconda::diamond=2.0.15
+  - bioconda::orthofinder=2.5.5
+  - panaroo
+  - bioconda::prodigal
+  - bioconda::pyrodigal
+  - conda-forge::tar
+  - conda-forge::pandas
+  - bioconda::gtotree
+  - conda-forge::xlsxwriter=3.0.3
+  - bioconda::ncbi-genome-download
+  - bioconda::gecco
+  - bioconda::n50
+  - bioconda::pyseer
+  - scikit-learn=1.2.2
+  - numpy
+  - bioconda::zol
+  - r-base
+  - r-ggplot2
+  - r-cowplot
+  - r-phytools
+  - r-ape
+  - r-scatterpie
+  - r-dplyr
+  - r-gggenes
+  - bioconductor-ggtree
+  - r-ggalluvial
+  - r-data.table
+  - r-plyr
+  - r-gridextra
