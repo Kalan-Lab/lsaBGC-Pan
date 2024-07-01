@@ -1,0 +1,3 @@
+- add code to process antiSMASH BGC and genome GenBank files for locus tags - be careful to match locus tags between BGC and full genome.
+- adapt R scripts to always be written to lsaBGC-See, lsaBGC-ComprehenSeeIve, GSeeF folders.
+- remove processAndReformatNCBIGenbank and runProdigal scripts because these are in zol anyway.

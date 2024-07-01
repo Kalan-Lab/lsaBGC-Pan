@@ -1,1 +1,0 @@
-Default location to install BiG-SCAPE using setup_biscape.py

@@ -1320,6 +1320,126 @@ def processGenomesAsGenbanks(sample_genomes, proteomes_directory, genbanks_direc
 		raise RuntimeError(traceback.format_exc())
 	return sample_genomes
 
+def addLocusTagsToGBKs(inputs):
+	sample = inputs[0]
+	locus_tag_prefix = inputs[1]
+	resdir = inputs[2]
+	genome_gbk = inputs[3]
+	region_gbks = inputs[4:-1]
+	logObject = inputs[-1]
+	try:
+		samp_resdir = resdir + sample + '/'
+		setupReadyDirectory([samp_resdir])
+		location_to_cds = {}
+		cds_iter = 0
+		updated_genome_gbk = samp_resdir + genome_gbk.split('/')[-1]	
+		ugg_handle = open(updated_genome_gbk, 'w')
+		with open(genome_gbk) as ogg:
+			for rec in SeqIO.parse(ogg, 'genbank'):
+				updated_rec = rec
+				updated_features = []
+				scaff = rec.id
+				for feat in rec.features:
+					if not feat.type != 'CDS': continue
+					cds_lt = None
+					# first try setting locus tag to just protein_id
+					try:
+						cds_lt = feat.qualifiers.get('protein_id')[0]
+					except:
+						pass
+
+					all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feat.location))
+					loctup = tuple([scaff, start])
+
+					if cds_lt == None:
+						cds_lt = locus_tag_prefix
+						if (cds_iter+1) < 10:
+							cds_lt += '_00000'+str(cds_iter+1)
+						elif (cds_iter+1) < 100:
+							cds_lt += '_0000'+str(cds_iter+1)
+						elif (cds_iter+1) < 1000:
+							cds_lt += '_000'+str(cds_iter+1)
+						elif (cds_iter+1) < 10000:
+							cds_lt += '_00'+str(cds_iter+1)
+						elif (cds_iter+1) < 100000:
+							cds_lt += '_0'+str(cds_iter+1)
+						else:
+							cds_lt += '_' + str(cds_iter+1)
+						cds_iter += 1
+					
+					feat.qualifiers['locus_tag'] = cds_lt
+					updated_features.append(feat)
+					location_to_cds[loctup] = cds_lt
+
+				updated_rec.features = updated_features
+				SeqIO.write(updated_rec, ugg_handle, 'genbank')
+		ugg_handle.close()
+
+		for bgc_gbk in region_gbks:
+			bgc_starts = []
+			with open(bgc_gbk) as ogbf:
+				for line in ogbf:
+					line = line.strip()
+					if line.startswith('Orig. start  ::'):
+						bgc_starts.append(int(line.split()[-1].replace('>', '').replace('<', '')))			
+			assert(len(bgc_starts) == 1)
+			bgc_start = bgc_starts[0]
+
+			updated_bgc_gbk = resdir + genome_gbk.split('/')[-1]	
+			ubg_handle = open(updated_genome_gbk, 'w')
+			with open(bgc_gbk) as ogbf:
+				for rec in SeqIO.parse(ogbf, 'genbank'):
+					scaff = rec.id
+					updated_features = []
+					for feat in rec.features:
+						if not feat.type != 'CDS': continue
+						cds_lt = None
+						
+						# maybe put back in; first try setting locus tag to just protein_id
+						# try:
+						# 	cds_lt = feat.qualifiers.get('protein_id')[0]
+						# except:
+						# 	pass
+
+						all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feat.location))
+						loctup = tuple([scaff, start])
+						cds_lt = location_to_cds[loctup]
+						feat.qualifiers['locus_tag'] = cds_lt
+						updated_features.append(feat)
+
+					updated_rec.features = updated_features
+					SeqIO.write(updated_rec, ubg_handle, 'genbank')
+			ubg_handle.close()
+
+	except Exception as e:
+		logObject.warning("Problem processing one of the GenBank files for sample %s to add CDS locus tags." % sample)
+		logObject.warning(traceback.format_exc())
+
+def checkCDSHaveLocusTags(inputs):
+	sample, gbk_type, gbk, outf, logObject = inputs
+	try:
+		cds_count = 0
+		all_cds_have_lt = True
+		with open(gbk) as ogbk:
+			for rec in SeqIO.parse(ogbk, 'genbank'):
+				for feat in rec.features:
+					if feat.type != 'CDS': continue
+					locus_tag = None
+					try:
+						locus_tag = feat.qualifiers.get('locus_tag')[0]
+					except:
+						pass
+					cds_count += 1
+					if locus_tag != None:
+						all_cds_have_lt = False
+
+		outh = open(outf, 'w')
+		outh.write(gbk_type, str(sample) + '\t' + gbk + '\t' + str(cds_count) + '\t' + str(all_cds_have_lt) + '\n')
+		outh.close()
+	except Exception as e:
+		logObject.warning("Problem processing GenBank file %s for sample %s" % (gbk, sample))
+		logObject.warning(traceback.format_exc())
+
 def findAntiSMASHBGCInFullGenbank(inputs):
 	try:
 		bgc_gbk, full_gbk, outf, bgc_prediction_software = inputs
@@ -1329,9 +1449,7 @@ def findAntiSMASHBGCInFullGenbank(inputs):
 		with open(bgc_gbk) as ogbf:
 			for line in ogbf:
 				line = line.strip()
-				if line.startswith('LOCUS'):
-					bgc_scaffold = line.split()[1].strip()
-				elif line.startswith('Orig. start  ::'):
+				if line.startswith('Orig. start  ::'):
 					bgc_starts.append(int(line.split()[-1].replace('>', '').replace('<', '')))			
 				elif line.startswith('Original ID  ::'):
 					bgc_scaffold = line.split()[-1].strip()
@@ -1339,6 +1457,7 @@ def findAntiSMASHBGCInFullGenbank(inputs):
 		bgc_length = 0
 		with open(bgc_gbk) as obgf:
 			for rec in SeqIO.parse(obgf, 'genbank'):
+				bgc_scaffold = rec.id
 				bgc_length = len(str(rec.seq))
 
 		outf_handle = open(outf, 'w')
@@ -1474,6 +1593,23 @@ def processBGCGenbanks(bgc_listing_file, bgc_mappings, bgc_prediction_software, 
 	return ([sample_bgcs, bgc_to_sample])
 
 
+def extractProteinsFromGenBank(inputs):
+	input_genbank, output_proteome, logObject = inputs
+	try:
+		op_handle = open(output_proteome, 'w')
+		with open(input_genbank) as oigf:
+			for rec in SeqIO.parse(oigf, 'genbank'):
+				for feature in rec.features:
+					if feature.type == 'CDS':
+						prot_lt = feature.qualifiers.get('locus_tag')[0]
+						prot_seq = str(feature.qualifiers.get('translation')[0]).replace('*', '')
+						op_handle.write('>' + prot_lt + '\n' + prot_seq + '\n')
+		op_handle.close()
+	except Exception as e:
+		logObject.error("Issues with parsing out protein sequences from GenBank file %s." % input_genbank) 
+		logObject.error(traceback.format_exc())
+		raise RuntimeError(traceback.format_exc())
+
 def extractProteinsFromBGCs(sample_bgcs, bgc_prot_directory, logObject):
 	sample_bgc_prots = defaultdict(lambda: defaultdict(set))
 	try:
@@ -1500,120 +1636,6 @@ def extractProteinsFromBGCs(sample_bgcs, bgc_prot_directory, logObject):
 		logObject.error(traceback.format_exc())
 		raise RuntimeError(traceback.format_exc())
 	return sample_bgc_prots
-
-
-def performKOFamAndPGAPAnnotation(sample_bgc_proteins, bgc_prot_directory, annot_directory, kofam_hmm_file,
-								  pgap_hmm_file,
-								  kofam_pro_list, pgap_inf_list, logObject, cpus=1):
-	sample_protein_annotations = defaultdict(lambda: defaultdict(lambda: "hypothetical protein"))
-	try:
-		ko_score_cutoffs = {}
-		ko_score_types = {}
-		ko_descriptions = defaultdict(lambda: "NA")
-		pgap_descriptions = defaultdict(lambda: "NA")
-		if kofam_pro_list != None and kofam_hmm_file != None:
-			with open(kofam_pro_list) as okpl:
-				for i, line in enumerate(okpl):
-					if i == 0: continue
-					line = line.strip()
-					ls = line.split('\t')
-					ko = ls[0]
-					if ls[1] == '-': continue
-					score_cutoff = float(ls[1])
-					profile_type = ls[2]
-					description = ls[-1]
-					ko_score_cutoffs[ko] = score_cutoff
-					ko_score_types[ko] = profile_type
-					ko_descriptions[ko] = description
-
-		if pgap_inf_list != None and pgap_hmm_file != None:
-			with open(pgap_inf_list) as opil:
-				for i, line in enumerate(opil):
-					if i == 0: continue
-					line = line.strip()
-					ls = line.split('\t')
-					label = ls[2]
-					description = ls[10]
-					pgap_descriptions[label] = description
-
-		hmmsearch_cmds = []
-		for f in os.listdir(bgc_prot_directory):
-			sample = f.split('.faa')[0]
-			prot_file = bgc_prot_directory + f
-			ko_annot_result = annot_directory + sample + '.ko.txt'
-			pgap_annot_result = annot_directory + sample + '.pgap.txt'
-			if kofam_pro_list != None and kofam_hmm_file != None:
-				hmmsearch_ko_cmd = ['hmmsearch', '--cpu', '2', '--tblout', ko_annot_result, kofam_hmm_file,
-									prot_file, logObject]
-				hmmsearch_cmds.append(hmmsearch_ko_cmd)
-			if pgap_inf_list != None and pgap_hmm_file != None:
-				hmmsearch_pgap_cmd = ['hmmsearch', '--cpu', '2', '--tblout', pgap_annot_result, pgap_hmm_file,
-									  prot_file, logObject]
-				hmmsearch_cmds.append(hmmsearch_pgap_cmd)
-
-		p = multiprocessing.Pool(math.floor(cpus / 2))
-		p.map(multiProcess, hmmsearch_cmds)
-		p.close()
-
-		for sample in sample_bgc_proteins:
-			ko_annot_result = annot_directory + sample + '.ko.txt'
-			pgap_annot_result = annot_directory + sample + '.pgap.txt'
-			hits_per_prot = defaultdict(list)
-
-			if os.path.isfile(ko_annot_result):
-				with open(ko_annot_result) as orf:
-					for line in orf:
-						if line.startswith("#"): continue
-						line = line.strip()
-						ls = line.split()
-						ko = ls[2]
-						prot_id = ls[0]
-						full_eval = float(ls[4])
-						full_score = float(ls[5])
-						dom_score = float(ls[8])
-						if ko in ko_score_types:
-							if ko_score_types[ko] == 'full' and full_score >= ko_score_cutoffs[ko]:
-								hits_per_prot[prot_id].append(['ko', ko, -full_score, full_eval])
-							elif ko_score_types[ko] == 'domain' and dom_score >= ko_score_cutoffs[ko]:
-								hits_per_prot[prot_id].append(['ko', ko, -dom_score, full_eval])
-						if full_eval < 1e-10:
-							hits_per_prot[prot_id].append(['ko', ko, 1E10, full_eval])
-
-			if os.path.isfile(pgap_annot_result):
-				with open(pgap_annot_result) as orf:
-					for line in orf:
-						if line.startswith("#"): continue
-						line = line.strip()
-						ls = line.split()
-						pgap = ls[2]
-						prot_id = ls[0]
-						full_eval = float(ls[4])
-						if full_eval < 1e-10:
-							hits_per_prot[prot_id].append(['pgap', pgap, 1E10, full_eval])
-
-			best_hits = defaultdict(lambda: 'hypothetical protein')
-			for pi in hits_per_prot:
-				for i, hit in enumerate(sorted(hits_per_prot[pi], key=lambda h: (h[2], h[3]), reverse=False)):
-					if i == 0:
-						conf = ' (High Confidence)'
-						if hit[2] == 1E10 and hit[0] == 'ko':
-							conf = ' (KO; Low Confidence : e-val < 1e-10)'
-						elif hit[2] == 1E10 and hit[0] == 'pgap':
-							conf = ' (PGAP; Low Confidence : e-val < 1e-10)'
-						if hit[0] == 'ko':
-							best_hits[pi] = hit[1] + ': ' + ko_descriptions[hit[1]] + conf
-						else:
-							best_hits[pi] = hit[1] + ': ' + pgap_descriptions[hit[1]] + conf
-
-			for bgc in sample_bgc_proteins[sample]:
-				for pi in sample_bgc_proteins[sample][bgc]:
-					sample_protein_annotations[sample][pi] = best_hits[pi]
-
-	except Exception as e:
-		logObject.error("Issues with performing KOfam / PGAP based annotations.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-	return dict(sample_protein_annotations)
 
 def determineAsofName(asof_index):
 	asof_index_str = str(asof_index)
@@ -1779,6 +1801,80 @@ def runOrthoFinder2Full(bgc_prot_directory, orthofinder_outdir, logObject, cpus=
 
 		assert (genomes == genomes_mf and genomes == genomes_sf)
 		assert (os.path.isfile(result_file))
+	except Exception as e:
+		logObject.error("Problem with running OrthoFinder2 cmd: %s." % ' '.join(orthofinder_cmd))
+		logObject.error(traceback.format_exc())
+		raise RuntimeError(traceback.format_exc())
+	return result_file
+
+
+def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, logObject, cpus=1):
+	result_file = orthofinder_outdir + 'Final_Orthogroups.tsv'
+	try:
+		orthofinder_cmd = ['orthofinder', '-f', prot_directory, '-t', str(cpus)]
+
+		logObject.info('Running the following command: %s' % ' '.join(orthofinder_cmd))
+		subprocess.call(' '.join(orthofinder_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+						executable='/bin/bash')
+		logObject.info('Successfully ran OrthoFinder!')
+		tmp_orthofinder_dir = os.path.abspath(
+			[prot_directory + 'OrthoFinder/' + f for f in os.listdir(prot_directory + 'OrthoFinder/') if
+			 f.startswith('Results')][0]) + '/'
+
+		os.system('mv %s %s' % (tmp_orthofinder_dir, orthofinder_outdir))
+		n0_file = orthofinder_outdir + 'Phylogenetic_Hierarchical_Orthogroups/N0.tsv'
+		
+		result_handle = open(result_file, 'w')
+
+		genome_to_index = {}
+		hog_ids = set([])
+		hog_prots = set([])
+		with open(n0_file) as n0f:
+			for i, line in enumerate(n0f):
+				line = line.strip('\n')
+				ls = line.split('\t')
+				if i == 0:
+					genomes = ls[3:]
+					for j, genome in enumerate(genomes):
+						genome_to_index[genome] = j
+					result_handle.write('Orthogroup\t' + '\t'.join(genomes) + '\n')
+				else:
+					hog = ls[0].split('N0.')[1]
+					hog_ids.add(int(hog.split('HOG')[1]))
+					result_handle.write('\t'.join([hog] + ls[3:]) + '\n')
+					for lts in ls[3:]:
+						for lt in lts.split(', '):
+							if lt.strip() != '':
+								hog_prots.add(lt)
+
+		hog_id_iter = max(hog_ids) + 1
+		for prot_file in os.listdir(prot_directory):
+			genome_id = '.faa'.join(prot_file.split('.faa')[:-1])
+			with open(prot_directory + prot_file) as opf:
+				for rec in SeqIO.parse(opf, 'fasta'):
+					if not rec.id in hog_prots:
+						hog_id_iter_str = 'HOG'
+						if (hog_id_iter) < 10:
+							hog_id_iter_str += '00000'+str(hog_id_iter)
+						elif (hog_id_iter) < 100:
+							hog_id_iter_str += '0000'+str(hog_id_iter)
+						elif (hog_id_iter) < 1000:
+							hog_id_iter_str += '000'+str(hog_id_iter)
+						elif (hog_id_iter) < 10000:
+							hog_id_iter_str += str(hog_id_iter)
+						elif (hog_id_iter) < 100000:
+							hog_id_iter_str += str(hog_id_iter)
+						else:
+							hog_id_iter_str += str(hog_id_iter)
+						printlist = ['HOG' + hog_id_iter_str]
+						hog_id_iter += 1
+						for gi in range(0, len(genome_to_index)):
+							if genome_to_index[gi] == genome:
+								printlist.append(rec.id)
+							else:
+								printlist.append('')
+						result_handle.write('\t'.join(printlist) + '\n')		
+		result_handle.close()
 	except Exception as e:
 		logObject.error("Problem with running OrthoFinder2 cmd: %s." % ' '.join(orthofinder_cmd))
 		logObject.error(traceback.format_exc())

@@ -43,3 +43,4 @@ dependencies:
   - r-data.table
   - r-plyr
   - r-gridextra
+  - bioconda::bigscape
