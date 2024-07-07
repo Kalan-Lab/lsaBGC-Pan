@@ -3,7 +3,7 @@
 
 lsaBGC-Pan is largely the same lsaBGC package reconfigured for easier installation via both Docker and Bioconda and featuring a snew workflow bearing the same name as the repo. There are some additional new analytical options -e.g. (de-)association testing of BGC ortholog groups and GCFs -, the lsaBGC-(Auto)Expansion functionalities have been taken out, and lsaBGC-PopGene has been replaced with zol. 
 
-<img src="https://github.com/Kalan-Lab/lsaBGC-Pan/assets/4260723/3aa3426e-39d6-4d25-91a3-44be288a6ad4" width="500">
+<img src="https://github.com/Kalan-Lab/lsaBGC-Pan/assets/4260723/3aa3426e-39d6-4d25-91a3-44be288a6ad4" width="200">
 
 ### Manuscript
 
