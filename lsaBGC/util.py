@@ -18,17 +18,320 @@ import math
 import numpy as np
 import gzip
 import pathlib
-import operator
 import warnings
+warnings.simplefilter('ignore')
 import pkg_resources  # part of setuptools
 
-warnings.filterwarnings('ignore')
-version = pkg_resources.require("lsaBGC")[0].version
-
+version = pkg_resources.require("lsaBGC-Pan")[0].version
 
 valid_alleles = set(['A', 'C', 'G', 'T'])
-curr_dir = os.path.abspath(pathlib.Path(__file__).parent.resolve()) + '/'
-main_dir = '/'.join(curr_dir.split('/')[:-2]) + '/'
+
+def reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject):
+	ortholog_listing_file = zol_results_dir + 'LocusTag_to_Ortholog_Relations.txt'
+	try:
+		outf = open(ortholog_listing_file, 'w')
+		with open(ortholog_matrix_file) as omf:
+			for i, line in enumerate(omf):
+				line = line.strip('\n')
+				ls = line.split('\t')
+				if i == 0: continue
+				og = ls[0]
+				for lts in ls[1:]:
+					for lt in lts.split(', '):
+						if lt.strip() != '':
+							outf.write(lt + '\t' + og + '\n')
+		outf.close()
+		return (ortholog_listing_file)
+	except:
+		msg = 'Issue reformatting ortholog group matrix to table format for use as input for zol.'
+		logObject.error(msg)
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
+
+def determineNonRepBGCs(sample, gcf, sample_gcf_bgcs, gcf_bgcs, bgc_pairwise_relations, edgy_bgcs, logObject):
+	try:
+		complete_bgcs = []
+		for sample_bgc in sample_gcf_bgcs:
+			if not sample_bgc in edgy_bgcs:
+				complete_bgcs.append(sample_bgc)
+		
+		nonrep_bgcs = set([])
+		if len(complete_bgcs) == 1:
+			for sample_bgc in sample_gcf_bgcs:
+				if sample_bgc != complete_bgcs[0]:
+					nonrep_bgcs.add(sample_bgc)
+
+		elif len(complete_bgcs) >= 2:
+			sample_bgc_scores = []
+			for sample_bgc in set(sample_gcf_bgcs).difference(edgy_bgcs):
+				sample_bgc_relation_to_gcf_bgcs = 0.0
+				for bgc in gcf_bgcs:
+					sample_bgc_relation_to_gcf_bgcs += bgc_pairwise_relations[sample_bgc][bgc]
+				sample_bgc_scores.append([sample_bgc, sample_bgc_relation_to_gcf_bgcs])
+
+			rep_bgc = None
+			for i, sbi in enumerate(sorted(sample_bgc_scores, key=itemgetter(1), reverse=True)): 
+				if i == 0:
+					rep_bgc = sbi[0]
+				
+			for sample_bgc in sample_gcf_bgcs:
+				if sample_bgc != rep_bgc:
+					nonrep_bgcs.add(sample_bgc)
+
+		elif len(complete_bgcs) == 0:
+			for sample_bgc in sample_gcf_bgcs:
+				sample_bgc_relation_to_gcf_bgcs = 0.0
+				for bgc in gcf_bgcs:
+					sample_bgc_relation_to_gcf_bgcs += bgc_pairwise_relations[sample_bgc][bgc]
+				sample_bgc_scores.append([sample_bgc, sample_bgc_relation_to_gcf_bgcs])
+
+			for i, sbi in enumerate(sorted(sample_bgc_scores, key=itemgetter(1), reverse=True)): 
+				if i > 0:
+					nonrep_bgcs.add(sbi[0])
+
+		assert(len(nonrep_bgcs) > 0)
+		return(nonrep_bgcs)
+	except:
+		msg = 'Issue selecting representative BGC for sample %s for GCF %s' % (sample, gcf)
+		logObject.error(msg)
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
+
+
+def runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matrix_file, mibig_dir, multi_thread, parallel_jobs_4thread, logObject):
+	try:
+		gcfs = set([])
+		with open(detailed_BGC_listing_with_Pop_and_GCF_map_file) as odbl:
+			for i, line in enumerate(odbl):
+				if i == 0: continue
+				line = line.strip()
+				sample, population, method, genome_path, bgc_id, bgc_path, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+				gcfs.add(gcf_id)
+
+		lsabgc_map_cmds = []
+		for gcf in gcfs:
+			resdir = mibig_dir + gcf + '/'
+			lsabgc_map_cmd = ['lsaBGC-MIBiGMapper', '-g', gcf, '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, 
+					 		 '-m', ortholog_matrix_file, '-o', resdir, '-c', str(multi_thread), logObject]
+			lsabgc_map_cmds.append(lsabgc_map_cmd)
+		try:
+			p = multiprocessing.Pool(parallel_jobs_4thread)
+			p.map(multiProcess, lsabgc_map_cmds)
+			p.close()
+		except:
+			msg = 'Issues with parallel running lsaBGC-MIBiGMapper commands.'
+			sys.stderr.write(msg + '\n')
+			logObject.error(msg)
+			sys.stderr.write(traceback.format_exc())
+			logObject.error(traceback.format_exc())
+			sys.exit(1)
+
+	except:
+		msg = 'Issues running lsaBGC-MIBiGMapper'
+		logObject.error(msg)
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
+
+def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, species_tree, ortholog_matrix_file, see_dir, compsee_dir, threads, logObject):
+	try:
+		gcfs = set([])
+		with open(detailed_BGC_listing_with_Pop_and_GCF_map_file) as odbl:
+			for i, line in enumerate(odbl):
+				if i == 0: continue
+				line = line.strip()
+				sample, population, method, genome_path, bgc_id, bgc_path, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+				gcfs.add(gcf_id)
+
+		lsabgc_see_and_csi_cmds = []
+		for gcf in gcfs:
+			gcf_see_resdir = see_dir + gcf + '/'
+			gcf_csi_resdir = compsee_dir + gcf + '/'
+			lsabgc_see_cmd = ['lsaBGC-See', '-g', gcf, '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, 
+					          '-s', species_tree, '-m', ortholog_matrix_file, '-o', gcf_see_resdir, logObject]
+			lsabgc_csi_cmd = ['lsaBGC-ComprehenSeeIve', '-g', gcf, '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, 
+					          '-s', species_tree, '-m', ortholog_matrix_file, '-o', gcf_csi_resdir, logObject]
+			lsabgc_see_and_csi_cmds.append(lsabgc_see_cmd)
+			lsabgc_see_and_csi_cmds.append(lsabgc_csi_cmd)
+			
+		try:
+			p = multiprocessing.Pool(threads)
+			p.map(multiProcess, lsabgc_see_and_csi_cmds)
+			p.close()
+		except:
+			msg = 'Issues with parallel running of lsaBGC-See and lsaBGC-ComprehenSeeIve commands.'
+			sys.stderr.write(msg + '\n')
+			logObject.error(msg)
+			sys.stderr.write(traceback.format_exc())
+			logObject.error(traceback.format_exc())
+			sys.exit(1)
+
+	except:
+		msg = 'Issues running lsaBGC-See and lsaBGC-ComprehenSeeIve'
+		logObject.error(msg)
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
+
+
+def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, multi_thread, parallel_jobs_4thread, logObject):
+	try:
+		gcf_sample_bgcs = defaultdict(lambda: defaultdict(list))
+		edgy_bgcs = set([])
+		gcf_bgcs = defaultdict(list)
+		with open(detailed_BGC_listing_with_Pop_and_GCF_map_file) as odbl:
+			for i, line in enumerate(odbl):
+				if i == 0: continue
+				line = line.strip()
+				sample, population, method, genome_path, bgc_id, bgc_path, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+				gcf_sample_bgcs[gcf_id][sample].append(bgc_path)
+				if float(dist_to_edge) <= zol_edge_distance:
+					edgy_bgcs.add(bgc_path)
+					gcf_bgcs[gcf_id].append(bgc_path)
+
+		zol_cmds = []
+	
+		zp = zol_parameters
+		if zol_high_quality_preset:
+			zp = '-qa -b -s'
+
+		for gcf in gcf_sample_bgcs:
+			gcf_bgcs_to_input = []
+			for sample in gcf_sample_bgcs[gcf]:
+				
+				if len(gcf_sample_bgcs[gcf][sample]) > 1:
+					if not zol_keep_multi_copy:
+						samp_gcf_nonrep_bgcs = determineNonRepBGCs(sample, gcf, gcf_sample_bgcs[gcf][sample], gcf_bgcs[gcf], pairwise_relations, edgy_bgcs, logObject)
+						samp_gcf_rep_bgcs = list(set(gcf_sample_bgcs[gcf][sample]).difference(samp_gcf_nonrep_bgcs))
+						gcf_bgcs_to_input = gcf_bgcs_to_input + samp_gcf_rep_bgcs
+					else:
+						gcf_bgcs_to_input = gcf_bgcs_to_input + gcf_sample_bgcs[gcf][sample]
+				else:
+					gcf_bgcs_to_input.append(gcf_sample_bgcs[gcf][sample][0])
+
+			gcf_full_bgcs_to_input = list(set(gcf_bgcs_to_input).difference(edgy_bgcs))
+			if len(gcf_bgcs_to_input) > 0:
+				zol_comp_cmd = ['zol', '-c', str(multi_thread), '-i', ' '.join(gcf_bgcs_to_input), zp, '-po', ortholog_listing_file, '-o', zol_comp_results_dir + gcf + '/', logObject]
+			else:
+				os.mkdir(zol_comp_results_dir + gcf)
+			if len(gcf_full_bgcs_to_input) > 0:
+				zol_full_cmd = ['zol', '-c', str(multi_thread), '-i', ' '.join(gcf_full_bgcs_to_input), zp, '-po', ortholog_listing_file,  '-o', zol_full_results_dir + gcf + '/', logObject]
+			else:
+				os.mkdir(zol_full_results_dir + gcf)
+
+			zol_cmds.append(zol_comp_cmd)
+			zol_cmds.append(zol_full_cmd)
+
+		try:
+			p = multiprocessing.Pool(parallel_jobs_4thread)
+			p.map(multiProcess, zol_cmds)
+			p.close()
+		except:
+			msg = 'Issues with parallel running of zol commands.'
+			sys.stderr.write(msg + '\n')
+			logObject.error(msg)
+			sys.stderr.write(traceback.format_exc())
+			logObject.error(traceback.format_exc())
+			sys.exit(1)
+
+	except:
+		msg = 'Issues running zol'
+		logObject.error(msg)
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
+
+#def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_results_dir, ):
+#	try:
+#	except:
+
+def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[]):
+	if logObject != None:
+		logObject.info('Running %s' % ' '.join(cmd))
+	try:
+		subprocess.call(' '.join(cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+						executable='/bin/bash')
+		for cf in check_files:
+			assert (os.path.isfile(cf))
+		for cd in check_directories:
+			assert (os.path.isdir(cd))
+		if logObject != None:
+			logObject.info('Successfully ran: %s' % ' '.join(cmd))
+	except:
+		if logObject != None:
+			logObject.error('Had an issue running: %s' % ' '.join(cmd))
+			logObject.error(traceback.format_exc())
+		raise RuntimeError('Had an issue running: %s' % ' '.join(cmd))
+
+
+def mapColorsToCategories(categories_set, colors_file, colors_mapping_file):
+	try:
+		colors = []
+		with open(colors_file) as ocf:
+			for line in ocf:
+				line = line.strip()
+				colors.append(line)
+		
+		assert(len(colors) >= len(categories_set))
+
+		cmf_handle = open(colors_mapping_file, 'w')
+		cmf_handle.write('category\tcolor\n')
+		for i, cat in enumerate(sorted(categories_set)):
+			cmf_handle.write(cat + '\t ' + colors[i] + '\n')
+		cmf_handle.close()
+	
+	except:
+		msg = 'Issue mapping colors from file to categories, potentially because too few colors provided.'
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
+def pairwiseDistancesFromTree(tree_file, logObject):
+	try:
+		t = Tree(tree_file)
+
+		leaves = set([])
+		for node in t.traverse('postorder'):
+			if node.is_leaf():
+				leaves.add(node.name)
+
+		pairwise_distances = defaultdict(lambda: defaultdict(lambda: None))
+		for i, l1 in enumerate(sorted(leaves)):
+			for j, l2 in enumerate(sorted(leaves)):
+				if i == j:
+					pairwise_distances[l1][l2] = 0.0
+				elif i < j:
+					dist = t.get_distance(l1, l2)
+					pairwise_distances[l1][l2] = dist
+					pairwise_distances[l2][l1] = dist
+		return(pairwise_distances)
+	except:	
+		msg = 'Issue with calculating pairwise distances between leaves in the tree file: %s' % tree_file
+		logObject.error(msg)
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
+
+def generateColors(workspace, outfile, color_count, palette='Spectral', palette_color_count=12):
+	try:
+		assert(os.path.isdir(workspace))
+		workspace = os.path.abspath(workspace) + '/'
+	
+		color_brew_script = workspace + 'brewColors.R'
+		cbs_handle = open(color_brew_script, 'w')
+		cbs_handle.write('library(RColorBrewer)\n')
+		cbs_handle.write('mycolors <- colorRampPalette(brewer.pal(' + str(palette_color_count) + ', "' + palette + '"))(' + str(color_count) + ')\n')
+		cbs_handle.write('write(mycolors, file="' + outfile + '")\n')		
+		cbs_handle.close()
+
+		rscript_cmd = ['Rscript', color_brew_script]
+		runCmdViaSubprocess(rscript_cmd, check_files=[outfile])
+
+	except:
+		msg = 'Issues generating colors!'
+		sys.stderr.write(msg + '\n')
+		sys.exit(1)
 
 def parseCDSCoord(str_gbk_loc):
 	try:
@@ -86,1002 +389,12 @@ def parseCDSCoord(str_gbk_loc):
 	except Exception as e:
 		raise RuntimeError(traceback.format_exc())
 
-def writeRefinedProteomes(s, sample_bgcs, refined_proteomes_outdir, logObject):
-	try:
-		refined_proteome_handle = open(refined_proteomes_outdir + s + '.faa', 'w')
-		for bgc in sample_bgcs:
-			with open(bgc) as obgc:
-				for rec in SeqIO.parse(obgc, 'genbank'):
-					for feature in rec.features:
-						if feature.type == "CDS":
-							lt = feature.qualifiers.get('locus_tag')[0]
-							prot_seq = feature.qualifiers.get('translation')[0]
-							refined_proteome_handle.write('>' + lt + '\n' + str(prot_seq) + '\n')
-		refined_proteome_handle.close()
-	except:
-		logObject.warning(
-			"Had issues writing sample %s's BGC-specific proteome file. Will be ignored in OrthoFinder analysis.")
-
-
-def getSampleRetentionSet(sample_retention_file):
-	sample_retention_set = None
-	if sample_retention_file:
-		sample_retention_set = set([])
-		with open(sample_retention_file) as osrf:
-			for line in osrf:
-				line = line.strip()
-				sample_retention_set.add(line)
-
-	return sample_retention_set
-
-
-def determineOutliersByGeneLength(gene_sequences, logObject):
-	filtered_gene_sequences = {}
-	try:
-		og_gene_nucl_seq_lens = []
-		for g in gene_sequences:
-			sample, gene = g.split('|')
-			if len(gene.split('_')[0]) == 3:
-				gene_nucl_seq = gene_sequences[g][0]
-				gene_nucl_seq_len = len(gene_nucl_seq)
-				og_gene_nucl_seq_lens.append(gene_nucl_seq_len)
-
-		median_gene_nucl_seq_lens = statistics.median(og_gene_nucl_seq_lens)
-		mad_gene_nucl_seq_lens = max(stats.median_abs_deviation(og_gene_nucl_seq_lens, scale="normal"), 25)
-
-		for g in gene_sequences:
-			gene_nucl_seq = gene_sequences[g][0]
-			gene_nucl_seq_len = len(gene_nucl_seq)
-			if abs(gene_nucl_seq_len - median_gene_nucl_seq_lens) <= mad_gene_nucl_seq_lens:
-				filtered_gene_sequences[g] = gene_sequences[g]
-	except:
-		logObject.warning(
-			"Unable to filter gene sequences to remove outliers, possibly because there are too few sequences.")
-		filtered_gene_sequences = gene_sequences
-	return filtered_gene_sequences
-
-
-def determineNonUniqueRegionsAlongCodonAlignment(outdir, initial_sample_prokka_data, codon_alignments_file, cpus=1,
-												 logObject=None):
-	"""
-	Wrapper function to determine regions along
-	"""
-	outdir = os.path.abspath(outdir) + '/'
-	prot_seq_dir = outdir + 'Protein_Sequences/'
-
-	if not os.path.isdir(prot_seq_dir): os.system('mkdir %s' % prot_seq_dir)
-
-	try:
-		gcf_protein_ids = set([])
-		gcf_protein_to_hg = {}
-		gene_pos_to_msa_pos = defaultdict(lambda: defaultdict(dict))
-		with open(codon_alignments_file) as ocaf:
-			for line in ocaf:
-				line = line.strip()
-				hg, cmsa_fasta = line.split('\t')
-				with open(cmsa_fasta) as ocf:
-					for rec in SeqIO.parse(ocf, 'fasta'):
-						samp, gene_id = rec.id.split('|')
-						if len(gene_id.split('_')[0]) != 3: continue
-						gcf_protein_to_hg[gene_id] = hg
-						gcf_protein_ids.add(gene_id)
-						real_pos = 1
-						for msa_pos, bp in enumerate(str(rec.seq)):
-							if bp != '-':
-								gene_pos_to_msa_pos[hg][gene_id][real_pos] = msa_pos + 1
-								real_pos += 1
-
-		all_gcf_proteins_fasta_file = outdir + 'All_GCF_Proteins.faa'
-		all_gcf_proteins_fasta_db = outdir + 'All_GCF_Proteins'
-		all_comp_gcf_proteins_fasta_file = outdir + 'Complement_All_GCF_Proteins.faa'
-		diamond_outfmt6_result_file = outdir + 'Diamond_CompProts_vs_Prots.txt'
-
-		all_gcf_proteins_fasta_handle = open(all_gcf_proteins_fasta_file, 'w')
-		all_comp_gcf_proteins_fasta_handle = open(all_comp_gcf_proteins_fasta_file, 'w')
-
-		original_samples = set([])
-		for sample in initial_sample_prokka_data:
-			sample_proteome = initial_sample_prokka_data[sample]['predicted_proteome']
-			with open(sample_proteome) as osp:
-				for rec in SeqIO.parse(osp, 'fasta'):
-					if len(rec.id.split('_')[0]) != 3: continue
-					original_samples.add(sample)
-					if rec.id in gcf_protein_ids:
-						all_gcf_proteins_fasta_handle.write('>' + rec.id + '\n' + str(rec.seq) + '\n')
-					else:
-						all_comp_gcf_proteins_fasta_handle.write('>' + rec.id + '\n' + str(rec.seq) + '\n')
-
-		all_gcf_proteins_fasta_handle.close()
-		all_comp_gcf_proteins_fasta_handle.close()
-
-		makedb_cmd = ['diamond', 'makedb', '--in', all_gcf_proteins_fasta_file, '-d', all_gcf_proteins_fasta_db]
-		if logObject:
-			logObject.info(
-				'Running Diamond makedb on proteins from GCF with the following command: %s' % ' '.join(makedb_cmd))
-		try:
-			subprocess.call(' '.join(makedb_cmd), shell=True, stdout=subprocess.DEVNULL,
-							stderr=subprocess.DEVNULL,
-							executable='/bin/bash')
-			if logObject:
-				logObject.info('Successfully ran: %s' % ' '.join(makedb_cmd))
-		except:
-			if logObject:
-				logObject.error('Had an issue running: %s' % ' '.join(makedb_cmd))
-				logObject.error(traceback.format_exc())
-			raise RuntimeError('Had an issue running: %s' % ' '.join(makedb_cmd))
-
-		diamond_cmd = ['diamond', 'blastp', '--threads', str(cpus), '--ultra-sensitive', '--db',
-					   all_gcf_proteins_fasta_db,
-					   '--query', all_comp_gcf_proteins_fasta_file, '--outfmt', '6', '--out',
-					   diamond_outfmt6_result_file,
-					   '--max-target-seqs', '0']
-		if logObject:
-			logObject.info(
-				'Running Diamond blastp between proteins not found in GCF against proteins found in GCF: %s' % ' '.join(
-					diamond_cmd))
-		try:
-			subprocess.call(' '.join(diamond_cmd), shell=True, stdout=subprocess.DEVNULL,
-							stderr=subprocess.DEVNULL,
-							executable='/bin/bash')
-			if logObject:
-				logObject.info('Successfully ran: %s' % ' '.join(diamond_cmd))
-		except:
-			if logObject:
-				logObject.error('Had an issue running: %s' % ' '.join(diamond_cmd))
-				logObject.error(traceback.format_exc())
-			raise RuntimeError('Had an issue running: %s' % ' '.join(diamond_cmd))
-
-		hg_msa_pos_aligned = defaultdict(lambda: defaultdict(set))
-		with open(diamond_outfmt6_result_file) as orf:
-			for line in orf:
-				line = line.strip()
-				ls = line.split()
-				qseqid, sseqid, pident, length, mismatch, gapopen, qstart, qend, sstart, send, evalue, bitscore = ls
-				pident = float(pident)
-				length = int(length)
-				if (length >= 20 and pident >= 99.0) or (length >= 33 and pident >= 90.0):
-					sstart = int(sstart)
-					send = int(send)
-					hg = gcf_protein_to_hg[sseqid]
-					for pos in range(sstart, send + 1):
-						msa_pos = gene_pos_to_msa_pos[hg][sseqid][pos]
-						hg_msa_pos_aligned[hg][msa_pos].add(qseqid.split('_')[0])
-
-		hg_differentiation_file = outdir + 'Non_Unique_Codon_Alignment_Positions.txt'
-		hg_differentiation_handle = open(hg_differentiation_file, 'w')
-		hg_nonunique_positions = defaultdict(set)
-		for hg in hg_msa_pos_aligned:
-			nonunique_positions = set([])
-			for msa_pos in hg_msa_pos_aligned[hg]:
-				if (len(hg_msa_pos_aligned[hg][msa_pos]) / float(len(original_samples))) >= 0.05:
-					nonunique_positions.add(msa_pos)
-			hg_nonunique_positions[hg] = nonunique_positions
-			hg_differentiation_handle.write(
-				'\t'.join([hg, ','.join([str(x) for x in sorted(nonunique_positions)])]) + '\n')
-		hg_differentiation_handle.close()
-		return hg_nonunique_positions
-	except:
-		if logObject:
-			logObject.error("Issues with determining non-unique positions on profile HMMs.")
-			logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-
-def determineSeqSimProteinAlignment(protein_alignment_file, use_only_core=True):
-	protein_sequences = {}
-	with open(protein_alignment_file) as ocaf:
-		for rec in SeqIO.parse(ocaf, 'fasta'):
-			protein_sequences[rec.id] = str(rec.seq).upper()
-
-	pair_seq_matching = defaultdict(lambda: defaultdict(lambda: 0.0))
-	for i, g1 in enumerate(sorted(protein_sequences)):
-		s1 = g1.split('|')[0]
-		g1s = protein_sequences[g1]
-		for j, g2 in enumerate(sorted(protein_sequences)):
-			if i >= j: continue
-			s2 = g2.split('|')[0]
-			if s1 == s2: continue
-			g2s = protein_sequences[g2]
-			tot_comp_pos = 0
-			match_pos = 0
-			for pos, g1a in enumerate(g1s):
-				g2a = g2s[pos]
-				if g1a != '-' or g2a != '-':
-					if not use_only_core or (use_only_core and g1a != '-' and g2a != '-'):
-						tot_comp_pos += 1
-						if g1a == g2a:
-							match_pos += 1
-			general_matching_percentage = 0.0
-			if tot_comp_pos > 0:
-				general_matching_percentage = float(match_pos) / float(tot_comp_pos)
-			if pair_seq_matching[s1][s2] < general_matching_percentage and pair_seq_matching[s2][
-				s1] < general_matching_percentage:
-				pair_seq_matching[s1][s2] = general_matching_percentage
-				pair_seq_matching[s2][s1] = general_matching_percentage
-
-	return pair_seq_matching
-
-
-def determineSeqSimCodonAlignment(codon_alignment_file, use_translation=False, use_only_core=True):
-	gene_sequences = {}
-	with open(codon_alignment_file) as ocaf:
-		for i, rec in enumerate(SeqIO.parse(ocaf, 'fasta')):
-			if use_translation:
-				gene_sequences[rec.id] = str(rec.seq.upper().translate().upper())
-			else:
-				gene_sequences[rec.id] = str(rec.seq).upper()
-
-	pair_seq_matching = defaultdict(lambda: defaultdict(lambda: 0.0))
-	for i, g1 in enumerate(sorted(gene_sequences)):
-		s1 = g1.split('|')[0]
-		g1s = gene_sequences[g1]
-		for j, g2 in enumerate(sorted(gene_sequences)):
-			if i >= j: continue
-			s2 = g2.split('|')[0]
-			if s1 == s2: continue
-			g2s = gene_sequences[g2]
-			tot_comp_pos = 0
-			match_pos = 0
-			for pos, g1a in enumerate(g1s):
-				g2a = g2s[pos]
-				if g1a != '-' or g2a != '-':
-					if not use_only_core or (use_only_core and g1a != '-' and g2a != '-'):
-						tot_comp_pos += 1
-						if g1a == g2a:
-							match_pos += 1
-
-			general_matching_percentage = 0.0
-			if tot_comp_pos > 0:
-				general_matching_percentage = float(match_pos) / float(tot_comp_pos)
-			if pair_seq_matching[s1][s2] < general_matching_percentage and pair_seq_matching[s2][
-				s1] < general_matching_percentage:
-				pair_seq_matching[s1][s2] = general_matching_percentage
-				pair_seq_matching[s2][s1] = general_matching_percentage
-
-	return pair_seq_matching
-
-
-def determineBGCSequenceSimilarity(input):
-	hg, s1, g1s, s2, g2s, i, j, use_only_core, comparisons_managed = input
-
-	comparison_id = '_|_'.join([hg, s1, s2, str(i), str(j)])
-
-	tot_comp_pos = 0
-	match_pos = 0
-	for pos, g1a in enumerate(g1s):
-		g2a = g2s[pos]
-		if g1a != '-' or g2a != '-':
-			if not use_only_core or (use_only_core and g1a != '-' and g2a != '-'):
-				tot_comp_pos += 1
-				if g1a == g2a:
-					match_pos += 1
-	general_matching_percentage = 0.0
-	if tot_comp_pos > 0:
-		general_matching_percentage = float(match_pos) / float(tot_comp_pos)
-	comparisons_managed[comparison_id] = general_matching_percentage
-
-
-def determineBGCSequenceSimilarityFromCodonAlignments(codon_alignments_file, cpus=1, use_translation=False,
-													  use_only_core=True):
-	sample_hgs = defaultdict(set)
-	comparisons_managed = None
-	pair_seq_matching = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: 0.0)))
-	with multiprocessing.Manager() as manager:
-		comparisons_managed = manager.dict()
-		multiprocess_inputs = []
-		with open(codon_alignments_file) as ocaf:
-			for line in ocaf:
-				line = line.strip()
-				hg, codon_alignment = line.split('\t')
-				gene_sequences = {}
-				allele_identifiers = {}
-				with open(codon_alignment) as oca:
-					for i, rec in enumerate(SeqIO.parse(oca, 'fasta')):
-						if use_translation:
-							gene_sequences[rec.id] = str(rec.seq.upper().translate().upper())
-						else:
-							gene_sequences[rec.id] = str(rec.seq).upper()
-						allele_identifiers[rec.id] = i
-						sample = rec.id.split('|')[0]
-						sample_hgs[sample].add(hg)
-
-				for i, g1 in enumerate(gene_sequences):
-					s1 = g1.split('|')[0]
-					g1s = gene_sequences[g1]
-					for j, g2 in enumerate(gene_sequences):
-						if i >= j: continue
-						s2 = g2.split('|')[0]
-						if s1 == s2: continue
-						g2s = gene_sequences[g2]
-						multiprocess_inputs.append([hg, s1, g1s, s2, g2s, i, j, use_only_core, comparisons_managed])
-		with manager.Pool(cpus) as pool:
-			pool.map(determineBGCSequenceSimilarity, multiprocess_inputs)
-
-		for comp in comparisons_managed:
-			hg, s1, s2, i, j = comp.split('_|_')
-			general_matching_percentage = comparisons_managed[comp]
-			if pair_seq_matching[s1][s2][hg] < general_matching_percentage and pair_seq_matching[s2][s1][
-				hg] < general_matching_percentage:
-				pair_seq_matching[s1][s2][hg] = general_matching_percentage
-				pair_seq_matching[s2][s1][hg] = general_matching_percentage
-
-	bgc_pairwise_similarities = defaultdict(lambda: defaultdict(lambda: ["NA", "NA"]))
-	for i, s1 in enumerate(sorted(sample_hgs)):
-		for j, s2 in enumerate(sorted(sample_hgs)):
-			if i >= j: continue
-			common_hgs = sample_hgs[s1].intersection(sample_hgs[s2])
-			total_hgs = sample_hgs[s1].union(sample_hgs[s2])
-			sum_pair_seq_matching = 0.0
-			for hg in common_hgs:
-				sum_pair_seq_matching += pair_seq_matching[s1][s2][hg]
-			if len(common_hgs) > 0:
-				bgc_pairwise_similarities[s1][s2] = [sum_pair_seq_matching / float(len(common_hgs)),
-													 float(len(common_hgs)) / float(len(total_hgs))]
-				bgc_pairwise_similarities[s2][s1] = [sum_pair_seq_matching / float(len(common_hgs)),
-													 float(len(common_hgs)) / float(len(total_hgs))]
-			else:
-				bgc_pairwise_similarities[s1][s2] = ["NA", 0.0]
-				bgc_pairwise_similarities[s2][s1] = ["NA", 0.0]
-
-	return bgc_pairwise_similarities
-
-
-def determineAllelesFromCodonAlignment(codon_alignment, max_mismatch=10, matching_percentage_cutoff=0.99,
-									   filter_by_genelength=True):
-	gene_sequences = {}
-	gene_sequences_lengths = []
-	allele_identifiers = {}
-	seqs_comprehensive = set([])
-	with open(codon_alignment) as oca:
-		for i, rec in enumerate(SeqIO.parse(oca, 'fasta')):
-			gene_sequences_lengths.append(len(str(rec.seq).upper().replace('N', '').replace('-', '')))
-	median_length = statistics.median(gene_sequences_lengths)
-	mad_length = max(stats.median_abs_deviation(gene_sequences_lengths, scale="normal"), 5)
-	with open(codon_alignment) as oca:
-		for i, rec in enumerate(SeqIO.parse(oca, 'fasta')):
-			gene_seq_len = len(str(rec.seq).upper().replace('N', '').replace('-', ''))
-			if filter_by_genelength and (
-					gene_seq_len < (median_length - mad_length) or gene_seq_len > (median_length + mad_length)):
-				continue
-			gene_sequences[rec.id] = str(rec.seq).upper()
-			allele_identifiers[rec.id] = i
-			seqs_comprehensive.add(rec.id)
-
-	pairs = []
-	seqs_paired = set([])
-	pair_matching = defaultdict(lambda: defaultdict(float))
-	for i, g1 in enumerate(gene_sequences):
-		g1s = gene_sequences[g1]
-		for j, g2 in enumerate(gene_sequences):
-			if i >= j: continue
-			g2s = gene_sequences[g2]
-			tot_comp_pos = 0
-			g1_comp_pos = 0
-			g2_comp_pos = 0
-			match_pos = 0
-			mismatch_pos = 0
-			for pos, g1a in enumerate(g1s):
-				g2a = g2s[pos]
-				if g1a in valid_alleles and g2a in valid_alleles:
-					if g1a != g2a:
-						mismatch_pos += 1
-				if g1a in valid_alleles or g2a in valid_alleles:
-					tot_comp_pos += 1
-					if g1a == g2a:
-						match_pos += 1
-				if g1a in valid_alleles:
-					g1_comp_pos += 1
-				if g2a in valid_alleles:
-					g2_comp_pos += 1
-			general_matching_percentage = float(match_pos) / float(tot_comp_pos)
-			g1_matching_percentage = float(match_pos) / float(g1_comp_pos)
-			g2_matching_percentage = float(match_pos) / float(g2_comp_pos)
-			pair_matching[g1][g2] = general_matching_percentage
-			if general_matching_percentage >= matching_percentage_cutoff or g1_matching_percentage >= matching_percentage_cutoff or g2_matching_percentage >= matching_percentage_cutoff:
-				if mismatch_pos <= max_mismatch:
-					seqs_paired.add(g1)
-					seqs_paired.add(g2)
-					pairs.append(sorted([g1, g2]))
-
-	"""	
-	Solution for single-linkage clustering taken from mimomu's repsonse in the stackoverflow page:
-	https://stackoverflow.com/questions/4842613/merge-lists-that-share-common-elements?lq=1
-	"""
-	L = pairs
-	LL = set(itertools.chain.from_iterable(L))
-	for each in LL:
-		components = [x for x in L if each in x]
-		for i in components:
-			L.remove(i)
-		L += [list(set(itertools.chain.from_iterable(components)))]
-
-	for seq in seqs_comprehensive:
-		if not seq in seqs_paired:
-			L.append([seq])
-
-	allele_cluster_min_id = {}
-	for allele_cluster in L:
-		gene_identifiers = set([])
-		for gene in allele_cluster:
-			gene_identifiers.add(allele_identifiers[gene])
-		min_gi = min(gene_identifiers)
-		allele_cluster_min_id[min_gi] = allele_cluster
-
-	allele_clusters = defaultdict(set)
-	for i, aci in enumerate(sorted(allele_cluster_min_id.keys())):
-		for gene in allele_cluster_min_id[aci]:
-			allele_clusters['Allele_Cluster_' + str(i + 1)].add(gene)
-
-	return [allele_clusters, pair_matching]
-
-
 def cleanUpSampleName(original_name):
 	return original_name.replace('#', '').replace('*', '_').replace(':', '_').replace(';', '_').replace(' ',
 																										'_').replace(
 		':', '_').replace('|', '_').replace('"', '_').replace("'", '_').replace("=", "_").replace('-', '_').replace('(',
 																													'').replace(
 		')', '').replace('/', '').replace('\\', '').replace('[', '').replace(']', '').replace(',', '')
-
-
-def read_pair_generator_defunct(bam, region_string=None, start=None, stop=None):
-	"""
-    Function taken from: https://www.biostars.org/p/306041/
-    Generate read pairs in a BAM file or within a region string.
-    Reads are added to read_dict until a pair is found.
-    """
-	read_dict = defaultdict(lambda: [None, None])
-	for read in bam.fetch(region_string, start=start, stop=stop):
-		if not read.is_proper_pair or read.is_supplementary:
-			continue
-		qname = read.query_name
-		if qname not in read_dict:
-			if read.is_read1:
-				read_dict[qname][0] = read
-			else:
-				read_dict[qname][1] = read
-		else:
-			if read.is_read1:
-				yield read, read_dict[qname][1]
-			else:
-				yield read_dict[qname][0], read
-			del read_dict[qname]
-
-
-def read_pair_generator(bam, region_string, reference_length, max_insert_size=500):
-	"""
-    Function adapted from: https://www.biostars.org/p/306041/
-    Generate read pairs in a BAM file or within a region string.
-    Reads are added to read_dict until a pair is found.
-    """
-
-	read_reverse_counts = defaultdict(int)
-	read_forward_counts = defaultdict(int)
-	for read in bam.fetch(region_string):
-		if read.is_supplementary: continue
-		qname = read.query_name
-		if read.is_reverse:
-			read_reverse_counts[qname] += 1
-		else:
-			read_forward_counts[qname] += 1
-
-	visited = set([])
-	read_dict = defaultdict(lambda: [None, None])
-	for read in bam.fetch(region_string):
-		if read.is_supplementary: continue
-		qname = read.query_name
-		if read_reverse_counts[qname] > 1 or read_forward_counts[qname] > 1: continue
-		if qname not in read_dict:
-			if read.is_read1:
-				read_dict[qname][0] = read
-			else:
-				read_dict[qname][1] = read
-		else:
-			# report proper pair paired-end reads, discard cases where both reads map to reference contig
-			# but in an improper fashion.
-			if read.is_proper_pair:
-				if read.is_read1:
-					yield read, read_dict[qname][1]
-				else:
-					yield read_dict[qname][0], read
-			visited.add(qname)
-			del read_dict[qname]
-
-	for read in bam.fetch(region_string):
-		qname = read.query_name
-		if qname in visited: continue
-		if read.is_supplementary or (not read.mate_is_unmapped): continue
-
-		first_real_alignment_pos = None
-		last_real_alignment_pos = None
-		indel_positions = set([])
-		match = 0
-		aligned = 0
-		for b in read.get_aligned_pairs(with_seq=True):
-			if b[0] != None and b[1] != None and b[2] != None:
-				if first_real_alignment_pos == None:
-					first_real_alignment_pos = b[0]
-				last_real_alignment_pos = b[0]
-				if b[2].isupper():
-					match += 1
-				aligned += 1
-			else:
-				indel_positions.add(b[0])
-		main_alignment_positions = set(range(first_real_alignment_pos, last_real_alignment_pos + 1))
-		has_indel = len(main_alignment_positions.intersection(indel_positions)) > 0
-
-		matching_percentage = match / aligned
-		positionally_checks_out = False
-		if read.is_reverse:
-			min_position = min(main_alignment_positions)
-			positionally_checks_out = (min_position - max_insert_size) < 0
-		else:
-			max_position = max(main_alignment_positions)
-			positionally_checks_out = (max_position + max_insert_size) > reference_length
-
-		if (positionally_checks_out):  # and (matching_percentage >= 0.95):
-			yield read_dict[qname][0], read_dict[qname][1]
-
-
-def getSpeciesRelationshipsFromPhylogeny(species_phylogeny, samples_in_gcf):
-	samples_in_phylogeny = set([])
-	t = Tree(species_phylogeny)
-	for leaf in t:
-		samples_in_phylogeny.add(str(leaf).strip('\n').lstrip('-'))
-
-	pairwise_distances = defaultdict(lambda: defaultdict(float))
-	for s1 in samples_in_gcf.intersection(samples_in_phylogeny):
-		for s2 in samples_in_gcf.intersection(samples_in_phylogeny):
-			try:
-				s1_s2_dist = t.get_distance(s1, s2)
-				pairwise_distances[s1][s2] = s1_s2_dist
-			except:
-				pass
-	return ([pairwise_distances, samples_in_phylogeny])
-
-
-def runBowtie2Alignments(bowtie2_reference, paired_end_sequencing_file, bowtie2_outdir, logObject, cpus=1):
-	"""
-	Wrapper function for running Bowtie2 alignments to reference database/index
-
-	:param bowtie2_reference: path to Bowtie2 reference/index
-	:param paired_end_sequencing_file: tab delimited file with three columns: (1) sample name (2) path to forward
-									   reads and (3) path to reverse reads
-	:param bowtie2_outdir: Path to directory where Bowtie2 results should be written
-	:param logObject: logging object for documentation
-	:param cpus: number of cpus (total) to use. If more than 4 cpus provided, then parallel Bowtie2 jobs with 4 cpus
-				  each will be started.
-	"""
-	bowtie2_cpus = cpus
-	bowtie2_pool_size = 1
-	if cpus >= 4:
-		bowtie2_cpus = 4
-		bowtie2_pool_size = int(cpus / 4)
-
-	try:
-		bowtie2_inputs = []
-		with open(paired_end_sequencing_file) as opesf:
-			for line in opesf:
-				line = line.strip()
-				sample = line.split('\t')[0]
-				reads = line.split('\t')[1:]
-				bowtie2_inputs.append([sample, reads, bowtie2_reference, bowtie2_outdir, bowtie2_cpus, logObject])
-		p = multiprocessing.Pool(bowtie2_pool_size)
-		p.map(bowtie2_alignment, bowtie2_inputs)
-		p.close()
-	except Exception as e:
-		logObject.error("Issues in setting up and running Bowtie2 alignments.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-
-def bowtie2_alignment(input_args):
-	"""
-	Function to perform Bowtie2 alignment of paired-end reads to a database/reference and post-processing of alignment
-	file with samtools (e.g. convert to BAM format, sort BAM file, and index it).
-	"""
-	sample, reads, bowtie2_reference, bowtie2_outdir, bowtie2_cpus, logObject = input_args
-
-	sam_file = bowtie2_outdir + sample + '.sam'
-	bam_file = bowtie2_outdir + sample + '.bam'
-	bam_file_sorted = bowtie2_outdir + sample + '.sorted.bam'
-	# bam_file_filtered = bowtie2_outdir + sample + '.filtered.bam'
-	# am_file_filtered_sorted = bowtie2_outdir + sample + '.filtered.sorted.bam'
-
-	bowtie2_cmd = ['bowtie2', '--very-sensitive-local', '--no-unal', '-a', '-x', bowtie2_reference, '-U',
-				   ','.join(reads), '-S', sam_file, '-p', str(bowtie2_cpus)]
-
-	samtools_view_cmd = ['samtools', 'view', '-h', '-Sb', sam_file, '>', bam_file]
-	samtools_sort_cmd = ['samtools', 'sort', '-@', str(bowtie2_cpus), bam_file, '-o', bam_file_sorted]
-	samtools_index_cmd = ['samtools', 'index', bam_file_sorted]
-
-	try:
-		run_cmd(bowtie2_cmd, logObject)
-		run_cmd(samtools_view_cmd, logObject)
-		run_cmd(samtools_sort_cmd, logObject)
-		run_cmd(samtools_index_cmd, logObject)
-
-		"""
-		bam_handle = pysam.AlignmentFile(bam_file_sorted, 'rb')
-		filt_bam_handle = pysam.AlignmentFile(bam_file_filtered, "wb", template=bam_handle)
-
-		for read in bam_handle.fetch():
-			if not read.is_proper_pair or read.is_supplementary: continue
-			filt_bam_handle.write(read)
-
-		filt_bam_handle.close()
-		bam_handle.close()
-
-		run_cmd(samtools_sort_cmd_2, logObject)
-		run_cmd(samtools_index_cmd_2, logObject)
-		"""
-
-		os.system(
-			"rm -f %s %s" % (sam_file, bam_file))  # bam_file_sorted, bam_file_filtered, bam_file_sorted + '.bai'))
-	except Exception as e:
-		if bowtie2_outdir != "" and sample != "":
-			os.system('rm -f %s/%s*' % (bowtie2_outdir, sample))
-		raise RuntimeError(traceback.format_exc())
-
-
-def createBGCGenbank(full_genbank_file, new_genbank_file, scaffold, start_coord, end_coord):
-	"""
-	Function to prune full genome-sized Genbank for only features in BGC of interest.
-
-	:param full_genbank_file: Prokka generated Genbank file for full genome.
-	:param new_genbank_file: Path to BGC specific Genbank to be created
-	:param scaffold: Scaffold identifier.
-	:param start_coord: Start coordinate.
-	:param end_coord: End coordinate.
-	"""
-	try:
-		ngf_handle = open(new_genbank_file, 'w')
-		pruned_coords = set(range(start_coord, end_coord + 1))
-		with open(full_genbank_file) as ogbk:
-			for rec in SeqIO.parse(ogbk, 'genbank'):
-				if not rec.id == scaffold: continue
-				original_seq = str(rec.seq)
-				filtered_seq = ""
-				if end_coord == len(original_seq):
-					filtered_seq = original_seq[start_coord - 1:]
-				else:
-					filtered_seq = original_seq[start_coord - 1:end_coord]
-
-				new_seq_object = Seq(filtered_seq)
-
-				updated_rec = copy.deepcopy(rec)
-				updated_rec.seq = new_seq_object
-
-				updated_features = []
-				for feature in rec.features:
-					all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-					feature_coords = set(range(start, end + 1))
-					if len(feature_coords.intersection(pruned_coords)) > 0:
-						fls = []
-						for sc, ec, dc in all_coords:
-							updated_start = sc - start_coord + 1
-							updated_end = ec - start_coord + 1
-							if ec > end_coord:
-								# note overlapping genes in prokaryotes are possible so avoid proteins that overlap
-								# with boundary proteins found by the HMM.
-								if feature.type == 'CDS':
-									continue
-								else:
-									updated_end = end_coord - start_coord + 1  # ; flag1 = True
-							if sc < start_coord:
-								if feature.type == 'CDS':
-									continue
-								else:
-									updated_start = 1  # ; flag2 = True
-
-							strand = 1
-							if dc == '-':
-								strand = -1
-							fls.append(FeatureLocation(updated_start - 1, updated_end, strand=strand))
-						if len(fls) > 0:
-							updated_location = fls[0]
-							if len(fls) > 1:
-								updated_location = sum(fls)
-							feature.location = updated_location
-							updated_features.append(feature)
-				updated_rec.features = updated_features
-				SeqIO.write(updated_rec, ngf_handle, 'genbank')
-		ngf_handle.close()
-	except Exception as e:
-		raise RuntimeError(traceback.format_exc())
-
-
-def parseGenbankAndFindBoundaryGenes(inputs):
-	"""
-	Function to parse Genbanks and return a dictionary of genes per scaffold, gene to scaffold, and a
-	set of genes which lie on the boundary of scaffolds.
-
-	:param sample_genbank: Prokka generated Genbank file.
-	:param distance_to_scaffold_boundary: Distance to scaffold edge considered as boundary.
-
-	:return gene_to_scaffold: Dictionary mapping each gene's locus tag to the scaffold it is found on.
-	:return scaffold_genes: Dictionary with keys as scaffolds and values as a set of genes found on that scaffold.
-	:return boundary_genes: Set of gene locus tag ids which are found within proximity to scaffold edges.
-	"""
-
-	distance_to_scaffold_boundary = 2000
-	gene_location = {}
-	scaffold_genes = defaultdict(set)
-	boundary_genes = set([])
-	gene_id_to_order = defaultdict(dict)
-	gene_order_to_id = defaultdict(dict)
-
-	sample, sample_genbank, sample_gbk_info = inputs
-	osg = None
-	if sample_genbank.endswith('.gz'):
-		osg = gzip.open(sample_genbank, 'rt')
-	else:
-		osg = open(sample_genbank)
-	for rec in SeqIO.parse(osg, 'genbank'):
-		scaffold = rec.id
-		scaffold_length = len(str(rec.seq))
-		boundary_ranges = set(range(1, distance_to_scaffold_boundary + 1)).union(
-			set(range(scaffold_length - distance_to_scaffold_boundary, scaffold_length + 1)))
-		gene_starts = []
-		for feature in rec.features:
-			if not feature.type == 'CDS': continue
-			locus_tag = feature.qualifiers.get('locus_tag')[0]
-
-			all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-
-			gene_location[locus_tag] = {'scaffold': scaffold, 'start': start, 'end': end, 'direction': direction}
-			scaffold_genes[scaffold].add(locus_tag)
-
-			gene_range = set(range(start, end + 1))
-			if len(gene_range.intersection(boundary_ranges)) > 0:
-				boundary_genes.add(locus_tag)
-
-			gene_starts.append([locus_tag, start])
-
-		for i, g in enumerate(sorted(gene_starts, key=itemgetter(1))):
-			gene_id_to_order[scaffold][g[0]] = i
-			gene_order_to_id[scaffold][i] = g[0]
-	osg.close()
-	sample_gbk_info[sample] = [gene_location, dict(scaffold_genes), boundary_genes, dict(gene_id_to_order),
-							   dict(gene_order_to_id)]
-
-
-def chunks(lst, n):
-	"""
-    Yield successive n-sized chunks from lst.
-    Solution taken from: https://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks
-    """
-	for i in range(0, len(lst), n):
-		yield lst[i:i + n]
-
-
-def calculateMashPairwiseDifferences(fasta_listing_file, outdir, name, sketch_size, cpus, logObject, prune_set=None):
-	"""
-	Calculate MASH pairwise distances (estimated ANI) between FASTA files.
-
-	:param fasta_listing_file: A tab-delimited listing file with two columns: (1) sample name (2) path to FASTA file
-	:param outdir: The output directory where to write results
-	:param name: Name of analysis scope
-	:param sketch_size: Sketch size (a parameter of MASH)
-	:param cpus: Number of cpus/threads to use
-	:param logObject: The logging object.
-	"""
-	mash_db = outdir + name
-	fastas = []
-	fasta_to_name = {}
-	try:
-		with open(fasta_listing_file) as oflf:
-			for line in oflf:
-				line = line.strip()
-				ls = line.split('\t')
-				if prune_set != None and not ls[0] in prune_set: continue
-				fastas.append(ls[1])
-				fasta_to_name[ls[1]] = ls[0]
-	except:
-		error_message = "Had issues reading the FASTA listing file %s" % fasta_listing_file
-		logObject.error(error_message)
-		raise RuntimeError(error_message)
-
-	mash_input_file = outdir + 'MASH_Input.txt'
-	mash_input_handle = open(mash_input_file, 'w')
-	mash_input_handle.write('\n'.join(fastas))
-	mash_input_handle.close()
-
-	# create mash database (using mash sketch)
-	mash_sketch_cmd = ['mash', 'sketch', '-p', str(cpus), '-s', str(sketch_size), '-o', mash_db, '-l', mash_input_file]
-	logObject.info('Running mash sketch with the following command: %s' % ' '.join(mash_sketch_cmd))
-	try:
-		subprocess.call(' '.join(mash_sketch_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-						executable='/bin/bash')
-		logObject.info('Successfully ran: %s' % ' '.join(mash_sketch_cmd))
-	except:
-		error_message = 'Had an issue running: %s' % ' '.join(mash_sketch_cmd)
-		logObject.error(error_message)
-		raise RuntimeError(error_message)
-	mash_db = mash_db + '.msh'
-
-	try:
-		assert (os.path.isfile(mash_db))
-	except:
-		error_message = "Had issue validating that MASH sketching worked properly, couldn't find: %s" % mash_db
-		logObject.error(error_message)
-		raise RuntimeError(error_message)
-
-	# run mash distance estimation
-	mash_dist_cmd = ['mash', 'dist', '-s', str(sketch_size), '-p', str(cpus), mash_db, mash_db, '>',
-					 outdir + name + '.out']
-	logObject.info('Running mash dist with the following command: %s' % ' '.join(mash_dist_cmd))
-	try:
-		subprocess.call(' '.join(mash_dist_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-						executable='/bin/bash')
-		logObject.info('Successfully ran: %s' % ' '.join(mash_dist_cmd))
-	except:
-		error_message = 'Had an issue running: %s' % ' '.join(mash_dist_cmd)
-		logObject.error(error_message)
-		raise RuntimeError(error_message)
-
-	pairwise_similarities = defaultdict(lambda: defaultdict(float))
-	try:
-		with open(outdir + name + '.out') as of:
-			for line in of:
-				line = line.strip()
-				ls = line.split('\t')
-				f1, f2, dist = ls[:3]
-				dist = float(dist)
-				n1 = fasta_to_name[f1]
-				n2 = fasta_to_name[f2]
-				pairwise_similarities[n1][n2] = (1.0 - dist)
-	except:
-		error_message = 'Had issues reading the output of MASH dist anlaysis in: %s.out' % outdir + name
-		logObject.error(error_message)
-		raise RuntimeError(error_message)
-	return pairwise_similarities
-
-
-def runFastANI(fasta_listing_file, outdir, fastani_output_file, cpus, logObject, prune_set=None):
-	"""
-	Calculate ANI estimate between pairs of samples using FastANI.
-
-	:param fasta_listing_file: A tab-delimited listing file with two columns: (1) sample name (2) path to FASTA file
-	:param outdir: The output directory where to write results
-	:param fastani_output_file: Output file name
-	:param cpus: Number of cpus/threads to use
-	:param logObject: The logging object.
-	"""
-	fastas = []
-	fasta_to_name = {}
-	try:
-		with open(fasta_listing_file) as oflf:
-			for line in oflf:
-				line = line.strip()
-				ls = line.split('\t')
-				if prune_set != None and not ls[0] in prune_set: continue
-				fastas.append(ls[1])
-				fasta_to_name[ls[1]] = ls[0]
-	except:
-		error_message = "Had issues reading the FASTA listing file %s" % fasta_listing_file
-		logObject.error(error_message)
-		raise RuntimeError(error_message)
-
-	fastani_input_file = outdir + 'FastANI_Input.txt'
-	fastani_input_handle = open(fastani_input_file, 'w')
-	fastani_input_handle.write('\n'.join(fastas))
-	fastani_input_handle.close()
-
-	if not os.path.isfile(fastani_output_file):
-		fastani_cmd = ['fastANI', '-t', str(cpus), '--ql', fastani_input_file, '--rl', fastani_input_file, '-o',
-					   fastani_output_file]
-		logObject.info('Running fastANI  with the following command: %s' % ' '.join(fastani_cmd))
-		try:
-			subprocess.call(' '.join(fastani_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-							executable='/bin/bash')
-			logObject.info('Successfully ran: %s' % ' '.join(fastani_cmd))
-		except:
-			error_message = 'Had an issue running: %s' % ' '.join(fastani_cmd)
-			logObject.error(error_message)
-			raise RuntimeError(error_message)
-		try:
-			assert (os.path.isfile(fastani_output_file))
-		except:
-			error_message = "Had issue validating that FastANI ran properly, couldn't find: %s" % fastani_output_file
-			logObject.error(error_message)
-			raise RuntimeError(error_message)
-	else:
-		logObject.info('fastANI result already exists, assuming valid and avoiding rerunning. ')
-
-	pairwise_similarities = defaultdict(lambda: defaultdict(float))
-	pairwise_comparisons = defaultdict(lambda: defaultdict(float))
-	try:
-		with open(fastani_output_file) as of:
-			for line in of:
-				line = line.strip()
-				ls = line.split('\t')
-				f1, f2, sim, comp_seg, tota_seg = ls
-				sim = float(sim)
-				comp_prop = float(comp_seg) / float(tota_seg)
-				n1 = fasta_to_name[f1]
-				n2 = fasta_to_name[f2]
-				pairwise_similarities[n1][n2] = sim / 100.0
-				pairwise_comparisons[n1][n2] = comp_prop
-	except:
-		error_message = 'Had issues reading the output of FastANI analysis at: %s' % fastani_output_file
-		logObject.error(error_message)
-		raise RuntimeError(error_message)
-	return [pairwise_similarities, pairwise_comparisons]
-
-
-def runCompareM(fasta_listing_file, comparem_results_dir, cpus, logObject, prune_set=None):
-	"""
-	Calculate AAI estimate between pairs of samples using CompareM.
-
-	:param fasta_listing_file: A tab-delimited listing file with two columns: (1) sample name (2) path to FASTA file
-	:param comparem_results_dir: The output directory where to write results
-	:param cpus: Number of cpus/threads to use
-	:param logObject: The logging object.
-	"""
-	fastas = []
-	fasta_to_name = {}
-	try:
-		with open(fasta_listing_file) as oflf:
-			for line in oflf:
-				line = line.strip()
-				ls = line.split('\t')
-				if prune_set != None and not ls[0] in prune_set: continue
-				fastas.append(ls[1])
-				fasta_to_name[ls[1]] = ls[0]
-	except:
-		error_message = "Had issues reading the FASTA listing file %s" % fasta_listing_file
-		logObject.error(error_message)
-		raise RuntimeError(error_message)
-
-	comparem_input_file = comparem_results_dir + 'CompareM_Input.txt'
-	comparem_input_handle = open(comparem_input_file, 'w')
-	comparem_input_handle.write('\n'.join(fastas))
-	comparem_input_handle.close()
-
-	tmp_dir = comparem_results_dir + 'tmp/'
-	if not os.path.isdir(tmp_dir): os.system('mkdir %s' % tmp_dir)
-
-	comparem_result_file = comparem_results_dir + 'aai/aai_summary.tsv'
-	if not os.path.isfile(comparem_result_file):
-		comparem_cmd = ['comparem', 'aai_wf', '--tmp_dir', tmp_dir, '--cpus', str(cpus), comparem_input_file,
-						comparem_results_dir]
-		logObject.info('Running CompareM  with the following command: %s' % ' '.join(comparem_cmd))
-		try:
-			subprocess.call(' '.join(comparem_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-							executable='/bin/bash')
-			logObject.info('Successfully ran: %s' % ' '.join(comparem_cmd))
-		except:
-			error_message = 'Had an issue running: %s' % ' '.join(comparem_cmd)
-			logObject.error(error_message)
-			raise RuntimeError(error_message)
-		try:
-			assert (os.path.isfile(comparem_result_file))
-		except:
-			error_message = "Had issue validating that CompareM ran properly, couldn't find: %s" % comparem_result_file
-			logObject.error(error_message)
-			raise RuntimeError(error_message)
-	else:
-		logObject.info('CompareM result already exists, assuming valid and avoiding rerunning.')
-
-	pairwise_similarities = defaultdict(lambda: defaultdict(float))
-	pairwise_comparisons = defaultdict(lambda: defaultdict(float))
-	try:
-		with open(comparem_result_file) as of:
-			for i, line in enumerate(of):
-				if i == 0: continue
-				line = line.strip()
-				s1, s1g, s2, s2g, com_genes, sim, sim_std, ortho_frac = line.split('\t')
-				sim = float(sim)
-				pairwise_similarities[s1][s2] = sim / 100.0
-				pairwise_similarities[s2][s1] = sim / 100.0
-				pairwise_comparisons[s1][s2] = float(com_genes) / float(s1g)
-				pairwise_comparisons[s2][s1] = float(com_genes) / float(s2g)
-	except:
-		error_message = 'Had issues reading the output of CompareM analysis at: %s' % comparem_result_file
-		logObject.error(error_message)
-		raise RuntimeError(error_message)
-	return [pairwise_similarities, pairwise_comparisons]
-
 
 def parseOrthoFinderMatrix(orthofinder_matrix_file, relevant_gene_lts, all_primary=False):
 	"""
@@ -1125,7 +438,6 @@ def parseOrthoFinderMatrix(orthofinder_matrix_file, relevant_gene_lts, all_prima
 
 	return ([gene_to_hg, hg_genes, hg_median_gene_counts, hg_multicopy_proportion])
 
-
 def run_cmd(cmd, logObject, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL):
 	"""
 	Simple function to run a single command through subprocess with logging.
@@ -1139,6 +451,16 @@ def run_cmd(cmd, logObject, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 		logObject.error(traceback.format_exc())
 		raise RuntimeError('Had an issue running: %s' % ' '.join(cmd))
 
+def multiProcessNoLog(input_cmd):
+	"""
+	Genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
+	to space separated command (as list).
+	"""
+	try:
+		subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+						executable='/bin/bash')
+	except Exception as e:
+		sys.stderr.write(traceback.format_exc())
 
 def multiProcess(input):
 	"""
@@ -1158,174 +480,13 @@ def multiProcess(input):
 		logObject.warning(traceback.format_exc())
 		sys.stderr.write(traceback.format_exc())
 
-
-def processGenomes(sample_genomes, prodigal_outdir, prodigal_proteomes, prodigal_genbanks, logObject, cpus=1,
-				   locus_tag_length=3, use_pyrodigal=False, avoid_locus_tags=set([])):
-	"""
-	Void function to run Prodigal based gene-calling and annotations.
-
-	:param sample_genomes: dictionary with keys as sample names and values as genomic assembly paths.
-	:param prodigal_outdir: full path to directory where Prokka results will be written.
-	:param prodigal_proteomes: full path to directory where Prokka generated predicted-proteome FASTA files will be moved after prodigal has run.
-	:param prodigal_genbanks: full path to directory where Prokka generated Genbank (featuring predicted CDS) files will be moved after prodigal has run.
-	:param taxa: name of the taxonomic clade of interest.
-	:param logObject: python logging object handler.
-	:param cpus: number of cpus to use in multiprocessing Prokka cmds.
-	:param locus_tag_length: length of locus tags to generate using unique character combinations.
-
-	Note length of locus tag must be 3 beause this is substituting for base lsaBGC analysis!!
-	"""
-
-	prodigal_cmds = []
-	try:
-		alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-		possible_locustags = sorted(list(
-			set([''.join(list(x)) for x in list(itertools.product(alphabet, repeat=locus_tag_length))]).difference(
-				avoid_locus_tags)))
-		for i, sample in enumerate(sample_genomes):
-			sample_assembly = sample_genomes[sample]
-			sample_locus_tag = ''.join(list(possible_locustags[i]))
-
-			prodigal_cmd = ['runProdigalAndMakeProperGenbank.py', '-i', sample_assembly, '-s', sample,
-							'-l', sample_locus_tag, '-o', prodigal_outdir]
-			if use_pyrodigal:
-				prodigal_cmd += ['-py']
-			prodigal_cmds.append(prodigal_cmd + [logObject])
-
-		p = multiprocessing.Pool(cpus)
-		p.map(multiProcess, prodigal_cmds)
-		p.close()
-
-		for sample in sample_genomes:
-			try:
-				assert (os.path.isfile(prodigal_outdir + sample + '.faa') and os.path.isfile(
-					prodigal_outdir + sample + '.gbk'))
-				os.system('mv %s %s' % (prodigal_outdir + sample + '.gbk', prodigal_genbanks))
-				os.system('mv %s %s' % (prodigal_outdir + sample + '.faa', prodigal_proteomes))
-			except:
-				raise RuntimeError(
-					"Unable to validate successful genbank/predicted-proteome creation for sample %s" % sample)
-	except Exception as e:
-		logObject.error(
-			"Problem with creating commands for running prodigal via script runProdigalAndMakeProperGenbank.py. Exiting now ...")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-
-def parseSampleGenomes(genome_listing_file, logObject):
-	try:
-		sample_genomes = {}
-		all_genbanks = True
-		all_fastas = True
-		at_least_one_genbank = False
-		at_least_one_fasta = False
-		with open(genome_listing_file) as oglf:
-			for line in oglf:
-				line = line.strip()
-				ls = line.split('\t')
-				sample, genome_file = ls
-				try:
-					assert (os.path.isfile(genome_file))
-				except:
-					logObject.warning(
-						"Problem with finding genome file %s for sample %s, skipping" % (genome_file, sample))
-					continue
-				if sample in sample_genomes:
-					logObject.warning(
-						'Skipping genome %s for sample %s because a genome file was already provided for this sample' % (
-						genome_file, sample))
-					continue
-
-				sample_genomes[sample] = genome_file
-				if not is_fasta(genome_file):
-					all_fastas = False
-				else:
-					at_least_one_fasta = True
-				if not is_genbank(genome_file):
-					all_genbanks = False
-				else:
-					at_least_one_genbank = True
-
-		format_prediction = 'mixed'
-		if all_genbanks and at_least_one_genbank:
-			format_prediction = 'genbank'
-		elif all_fastas and at_least_one_fasta:
-			format_prediction = 'fasta'
-
-		return ([sample_genomes, format_prediction])
-
-	except Exception as e:
-		logObject.error("Problem with creating commands for running Prodigal. Exiting now ...")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-
-def processGenomesAsGenbanks(sample_genomes, proteomes_directory, genbanks_directory, gene_name_mapping_outdir,
-							 logObject, cpus=1, locus_tag_length=3, avoid_locus_tags=set([])):
-	"""
-	Extracts CDS/proteins from existing Genbank files and recreates
-	"""
-
-	sample_genomes_updated = {}
-	process_cmds = []
-	try:
-		alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-		possible_locustags = sorted(list(
-			set([''.join(list(x)) for x in list(itertools.product(alphabet, repeat=locus_tag_length))]).difference(
-				avoid_locus_tags)))
-		lacking_cds_gbks = set([])
-
-		for i, sample in enumerate(sample_genomes):
-			sample_genbank = sample_genomes[sample]
-			ogh = None
-			if sample_genbank.endswith('.gz'):
-				ogh = gzip.open(sample_genbank, 'rt')
-			else:
-				ogh = open(sample_genbank)
-			cds_flag = False
-			for rec in SeqIO.parse(ogh, 'genbank'):
-				for feature in rec.features:
-					if feature.type == 'CDS':
-						cds_flag = True
-						break
-			ogh.close()
-			sample_locus_tag = ''.join(list(possible_locustags[i]))
-			if not cds_flag:
-				lacking_cds_gbks.add(sample)
-				logObject.warning('NCBI genbank file %s for sample %s lacks CDS features' % (sample_genbank, sample))
-				continue
-			process_cmd = ['processAndReformatNCBIGenbanks.py', '-i', sample_genbank, '-s', sample,
-						   '-l', sample_locus_tag, '-g', genbanks_directory, '-p', proteomes_directory, '-n',
-						   gene_name_mapping_outdir]
-			process_cmds.append(process_cmd + [logObject])
-
-		p = multiprocessing.Pool(cpus)
-		p.map(multiProcess, process_cmds)
-		p.close()
-
-		for sample in sample_genomes:
-			if sample in lacking_cds_gbks:
-				continue
-			try:
-				assert (os.path.isfile(proteomes_directory + sample + '.faa') and
-						os.path.isfile(genbanks_directory + sample + '.gbk') and
-						os.path.isfile(gene_name_mapping_outdir + sample + '.txt'))
-				sample_genomes_updated[sample] = genbanks_directory + sample + '.gbk'
-			except:
-				raise RuntimeError(
-					"Unable to validate successful genbank/predicted-proteome creation for sample %s" % sample)
-	except Exception as e:
-		logObject.error("Problem with processing existing Genbanks to (re)create genbanks/proteomes. Exiting now ...")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-	return sample_genomes
-
 def addLocusTagsToGBKs(inputs):
 	sample = inputs[0]
 	locus_tag_prefix = inputs[1]
 	resdir = inputs[2]
 	genome_gbk = inputs[3]
-	region_gbks = inputs[4:-1]
+	region_gbks = inputs[4:-2]
+	keep_ids_flag = inputs[-2]
 	logObject = inputs[-1]
 	try:
 		samp_resdir = resdir + sample + '/'
@@ -1340,13 +501,19 @@ def addLocusTagsToGBKs(inputs):
 				updated_features = []
 				scaff = rec.id
 				for feat in rec.features:
-					if not feat.type != 'CDS': continue
+					if feat.type != 'CDS': continue
 					cds_lt = None
 					# first try setting locus tag to just protein_id
-					try:
-						cds_lt = feat.qualifiers.get('protein_id')[0]
-					except:
-						pass
+					if keep_ids_flag:
+						try:
+							cds_lt = feat.qualifers.get('locus_tag')[0]
+						except:
+							try:
+								cds_lt = feat.qualifiers.get('protein_id')[0]
+							except:
+								msg = 'Issue finding either locus_tag or protein_id associated with CDS feature at %s' % str(feat.location)
+								sys.stderr.write(msg + '\n')
+								sys.exit(1)
 
 					all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feat.location))
 					loctup = tuple([scaff, start])
@@ -1385,24 +552,22 @@ def addLocusTagsToGBKs(inputs):
 			assert(len(bgc_starts) == 1)
 			bgc_start = bgc_starts[0]
 
-			updated_bgc_gbk = resdir + genome_gbk.split('/')[-1]	
-			ubg_handle = open(updated_genome_gbk, 'w')
+			updated_bgc_gbk = samp_resdir + bgc_gbk.split('/')[-1]	
+			ubg_handle = open(updated_bgc_gbk, 'w')
 			with open(bgc_gbk) as ogbf:
 				for rec in SeqIO.parse(ogbf, 'genbank'):
 					scaff = rec.id
+					updated_rec = rec
 					updated_features = []
 					for feat in rec.features:
-						if not feat.type != 'CDS': continue
+						if feat.type != 'CDS': 
+							updated_features.append(feat)
+							continue
 						cds_lt = None
 						
-						# maybe put back in; first try setting locus tag to just protein_id
-						# try:
-						# 	cds_lt = feat.qualifiers.get('protein_id')[0]
-						# except:
-						# 	pass
-
 						all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feat.location))
-						loctup = tuple([scaff, start])
+											
+						loctup = tuple([scaff, start+bgc_start])
 						cds_lt = location_to_cds[loctup]
 						feat.qualifiers['locus_tag'] = cds_lt
 						updated_features.append(feat)
@@ -1412,7 +577,10 @@ def addLocusTagsToGBKs(inputs):
 			ubg_handle.close()
 
 	except Exception as e:
-		logObject.warning("Problem processing one of the GenBank files for sample %s to add CDS locus tags." % sample)
+		msg = "Problem processing one of the GenBank files for sample %s to add CDS locus tags." % sample
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		logObject.warning(msg)
 		logObject.warning(traceback.format_exc())
 
 def checkCDSHaveLocusTags(inputs):
@@ -1430,11 +598,11 @@ def checkCDSHaveLocusTags(inputs):
 					except:
 						pass
 					cds_count += 1
-					if locus_tag != None:
+					if locus_tag == None:
 						all_cds_have_lt = False
 
 		outh = open(outf, 'w')
-		outh.write(gbk_type, str(sample) + '\t' + gbk + '\t' + str(cds_count) + '\t' + str(all_cds_have_lt) + '\n')
+		outh.write(gbk_type + '\t' + str(sample) + '\t' + gbk + '\t' + str(cds_count) + '\t' + str(all_cds_have_lt) + '\n')
 		outh.close()
 	except Exception as e:
 		logObject.warning("Problem processing GenBank file %s for sample %s" % (gbk, sample))
@@ -1442,68 +610,60 @@ def checkCDSHaveLocusTags(inputs):
 
 def findAntiSMASHBGCInFullGenbank(inputs):
 	try:
-		bgc_gbk, full_gbk, outf, bgc_prediction_software = inputs
+		full_gbk, bgc_gbk, outf = inputs
 
-		bgc_scaffold = None
 		bgc_starts = []
 		with open(bgc_gbk) as ogbf:
 			for line in ogbf:
 				line = line.strip()
-				if line.startswith('Orig. start  ::'):
+				if line.startswith('Orig. start'):
 					bgc_starts.append(int(line.split()[-1].replace('>', '').replace('<', '')))			
-				elif line.startswith('Original ID  ::'):
-					bgc_scaffold = line.split()[-1].strip()
 
+		bgc_scaffold = None
 		bgc_length = 0
-		with open(bgc_gbk) as obgf:
-			for rec in SeqIO.parse(obgf, 'genbank'):
+		with open(bgc_gbk) as obg:
+			for rec in SeqIO.parse(obg, 'genbank'):
 				bgc_scaffold = rec.id
 				bgc_length = len(str(rec.seq))
 
+		full_scaff_length = None
+		with open(full_gbk) as ofg:
+			for rec in SeqIO.parse(ofg, 'genbank'):
+				if rec.id == bgc_scaffold:
+					full_scaff_length = len(str(rec.seq))
+
+		assert(full_scaff_length != None)				
 		outf_handle = open(outf, 'w')
 		for start_coord in bgc_starts:
 			end_coord = start_coord + bgc_length - 1
-			outf_handle.write(bgc_scaffold + '\t' + str(start_coord) + '\t' + str(end_coord) + '\n')
+			outf_handle.write(bgc_scaffold + '\t' + str(start_coord) + '\t' + str(end_coord) + '\t' + str(min([start_coord, full_scaff_length-end_coord])) + '\n')
 		outf_handle.close()
 
 	except Exception as e:
 		raise RuntimeWarning(traceback.format_exc())
 
-def extractCDSFromGenBanks(inputs):
-	input_gbk, output_faa, logObject = inputs
-	try:
-		with open(input_gbk) as oig:
-			for rec in SeqIO.parse(oig, 'fasta'):
-				
-	except Exception as e:
-		msg = 'Issue extracting CDS proteins from GenBank file %s.' % input_gbk
-		sys.stderr.write(msg + '\n')
-		logObject.error(msg)
-		logObject.error(traceback.format_exc())
-		sys.stderr.write(traceback.format_exc())
-		sys.exit(1)
-
 def processAntiSMAHSBGCtoGenomeMappingResults(process_data, logObject):
 	try:
 		loc_lists = defaultdict(list)
 		for	pd in process_data:
+			sample = pd[0]
 			bgc_file = pd[2]
 			result_file = pd[3]
 			with open(result_file) as orf:
 				for line in orf:
 					line = line.strip()
-					sample, scaff, start_coord, end_coord = line.split('\t')
+					scaff, start_coord, end_coord, dist_to_edge = line.split('\t')
 					bgc_length = int(end_coord) - int(start_coord) + 1
-					loc_list = [sample, scaff, start_coord, end_coord, bgc_length, 'antismash']
+					loc_list = [sample, scaff, start_coord, end_coord, bgc_length, dist_to_edge, 'antismash']
 					loc_lists[bgc_file].append(loc_list)
 
-		bgc_locations = {}
+		bgc_locations = []
 		for bgc in loc_lists:
-			if len(loc_lists) != 0: 
+			if len(loc_lists[bgc]) != 1: 
 				sys.stderr.write('Warning: no location or more than 2 potential locations for BGC region %s. Skipping incorporation.' % bgc)
 				continue
 			else:
-				bgc_locations.append([bgc_file] + loc_lists[0])
+				bgc_locations.append([bgc] + loc_lists[bgc][0])
 		return bgc_locations		
 	
 	except Exception as e:
@@ -1513,85 +673,6 @@ def processAntiSMAHSBGCtoGenomeMappingResults(process_data, logObject):
 		logObject.error(traceback.format_exc())
 		sys.stderr.write(traceback.format_exc())
 		sys.exit(1)
-
-def processBGCGenbanks(bgc_listing_file, bgc_mappings, bgc_prediction_software, sample_genomes,
-					   antismash_bgcs_directory, proteomes_directory, logObject):
-	"""
-	Creates local versions of BGC prediction Genbanks where proteins have locus tags updated.
-	"""
-
-	sample_bgcs = defaultdict(set)
-	bgc_to_sample = {}
-	sample_protein_iter = defaultdict(lambda: 1000000)
-	try:
-		with open(bgc_listing_file) as oalf:
-			for line in oalf:
-				line = line.strip()
-				sample, og_bgc_genbank = line.split('\t')
-				prot_fasta = proteomes_directory + sample + '.faa'
-
-				if not os.path.isfile(prot_fasta):
-					logObject.warning(
-						"Issues with finding proteome for sample %s, thus skipping inclusion of BGCs belonging to this sample." % sample)
-					continue
-
-				loc_to_tag = {}
-				seq_to_tag = {}
-				sample_lt = None
-				with open(prot_fasta) as opf:
-					for rec in SeqIO.parse(opf, 'fasta'):
-						location_tuple = tuple(list(rec.description.split()[1:-1]))
-						loc_to_tag[location_tuple] = rec.id
-						seq_to_tag[str(rec.seq).replace('*', '')] = rec.id
-						sample_lt = rec.id.split('_')[0]
-
-				cp_bgc_sample_dir = antismash_bgcs_directory + sample + '/'
-				if not os.path.isdir(cp_bgc_sample_dir):
-					os.system('mkdir %s' % cp_bgc_sample_dir)
-
-				cp_bgc_genbank = cp_bgc_sample_dir + og_bgc_genbank.split('/')[-1]
-				if not og_bgc_genbank in bgc_mappings: continue
-				sample_bgcs[sample].add(cp_bgc_genbank)
-				bgc_to_sample[cp_bgc_genbank] = sample
-				cp_bgc_genbank_handle = open(cp_bgc_genbank, 'w')
-
-				scaff_id, scaff_start = bgc_mappings[og_bgc_genbank]
-				with open(og_bgc_genbank) as obgf:
-					for rec in SeqIO.parse(obgf, 'genbank'):
-						rec.name = scaff_id
-						rec.description = 'BGC prediction on scaffold %s by %s, starts at: %d' % (
-						scaff_id, bgc_prediction_software, scaff_start)
-						rec.id = scaff_id
-						updated_rec = copy.deepcopy(rec)
-						updated_features = []
-						for feature in rec.features:
-							if feature.type == 'CDS':
-								try:
-									all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-									start = scaff_start + start
-									end = scaff_start + end
-									loc_tuple = tuple([scaff_id, str(start), str(end)])
-									prot_seq = str(feature.qualifiers.get('translation')[0]).replace('*', '')
-									prot_id = loc_to_tag[loc_tuple]
-									prot_id_by_seq = seq_to_tag[prot_seq]
-									assert (prot_id_by_seq == prot_id)
-									feature.qualifiers.get('locus_tag')[0] = prot_id
-								except:
-									feature.qualifiers.get('locus_tag')[0] = sample_lt + '_' + str(
-										sample_protein_iter[sample_lt])
-									sample_protein_iter[sample_lt] += 1
-								updated_features.append(feature)
-							else:
-								updated_features.append(feature)
-						updated_rec.features = updated_features
-						SeqIO.write(updated_rec, cp_bgc_genbank_handle, 'genbank')
-				cp_bgc_genbank_handle.close()
-	except Exception as e:
-		logObject.error("Problem with parsing BGC Genbank listings.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-	return ([sample_bgcs, bgc_to_sample])
-
 
 def extractProteinsFromGenBank(inputs):
 	input_genbank, output_proteome, logObject = inputs
@@ -1609,33 +690,6 @@ def extractProteinsFromGenBank(inputs):
 		logObject.error("Issues with parsing out protein sequences from GenBank file %s." % input_genbank) 
 		logObject.error(traceback.format_exc())
 		raise RuntimeError(traceback.format_exc())
-
-def extractProteinsFromBGCs(sample_bgcs, bgc_prot_directory, logObject):
-	sample_bgc_prots = defaultdict(lambda: defaultdict(set))
-	try:
-		for sample in sample_bgcs:
-			samp_bgc_prot_file = bgc_prot_directory + sample + '.faa'
-			samp_bgc_prot_handle = open(samp_bgc_prot_file, 'w')
-			for bgc in sample_bgcs[sample]:
-				with open(bgc) as obf:
-					for rec in SeqIO.parse(obf, 'genbank'):
-						scaff_id = rec.id
-						scaff_start = int(rec.description.split()[-1].strip())
-						for feature in rec.features:
-							if feature.type == 'CDS':
-								prot_lt = feature.qualifiers.get('locus_tag')[0]
-								all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-								prot_seq = str(feature.qualifiers.get('translation')[0]).replace('*', '')
-								sample_bgc_prots[sample][bgc].add(prot_lt)
-								samp_bgc_prot_handle.write('>' + ' '.join([str(x) for x in
-																		   [prot_lt, scaff_id, start, end,
-																			direction]]) + '\n' + prot_seq + '\n')
-			samp_bgc_prot_handle.close()
-	except Exception as e:
-		logObject.error("Issues with parsing out protein sequences from BGC Genbanks.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-	return sample_bgc_prots
 
 def determineAsofName(asof_index):
 	asof_index_str = str(asof_index)
@@ -1657,17 +711,20 @@ def determineAsofName(asof_index):
 	assert(asof_name != None)
 	return(asof_name)
 
-def runOrthoFinder2Full(bgc_prot_directory, orthofinder_outdir, logObject, cpus=1):
+def runOrthoFinder2Full(prot_directory, orthofinder_outdir, run_msa, logObject, threads=1):
 	result_file = orthofinder_outdir + 'Final_Orthogroups.tsv'
 	try:
-		orthofinder_cmd = ['orthofinder', '-f', bgc_prot_directory, '-t', str(cpus)]
+		orthofinder_cmd = ['orthofinder', '-f', prot_directory, '-t', str(threads)]
+
+		if run_msa:
+			orthofinder_cmd += ['-M', 'msa']
 
 		logObject.info('Running the following command: %s' % ' '.join(orthofinder_cmd))
 		subprocess.call(' '.join(orthofinder_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 						executable='/bin/bash')
 		logObject.info('Successfully ran OrthoFinder!')
 		tmp_orthofinder_dir = os.path.abspath(
-			[bgc_prot_directory + 'OrthoFinder/' + f for f in os.listdir(bgc_prot_directory + 'OrthoFinder/') if
+			[prot_directory + 'OrthoFinder/' + f for f in os.listdir(prot_directory + 'OrthoFinder/') if
 			 f.startswith('Results')][0]) + '/'
 
 		os.system('mv %s %s' % (tmp_orthofinder_dir, orthofinder_outdir))
@@ -1808,10 +865,13 @@ def runOrthoFinder2Full(bgc_prot_directory, orthofinder_outdir, logObject, cpus=
 	return result_file
 
 
-def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, logObject, cpus=1):
+def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, run_msa, logObject, threads=1):
 	result_file = orthofinder_outdir + 'Final_Orthogroups.tsv'
 	try:
-		orthofinder_cmd = ['orthofinder', '-f', prot_directory, '-t', str(cpus)]
+		orthofinder_cmd = ['orthofinder', '-f', prot_directory, '-t', str(threads)]
+
+		if run_msa:
+			orthofinder_cmd += ['-M', 'msa']
 
 		logObject.info('Running the following command: %s' % ' '.join(orthofinder_cmd))
 		subprocess.call(' '.join(orthofinder_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -1882,16 +942,16 @@ def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, logObject, cpu
 	return result_file
 
 
-def runOrthoFinder2(bgc_prot_directory, orthofinder_outdir, logObject, cpus=1):
+def runOrthoFinder2(prot_directory, orthofinder_outdir, logObject, threads=1):
 	result_file = orthofinder_outdir + 'Final_Orthogroups.tsv'
 	try:
-		orthofinder_cmd = ['orthofinder', '-f', bgc_prot_directory, '-t', str(cpus), '-og']
+		orthofinder_cmd = ['orthofinder', '-f', prot_directory, '-t', str(threads), '-og']
 		logObject.info('Running the following command: %s' % ' '.join(orthofinder_cmd))
 		subprocess.call(' '.join(orthofinder_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 						executable='/bin/bash')
 		logObject.info('Successfully ran OrthoFinder!')
 		tmp_orthofinder_dir = os.path.abspath(
-			[bgc_prot_directory + 'OrthoFinder/' + f for f in os.listdir(bgc_prot_directory + 'OrthoFinder/') if
+			[prot_directory + 'OrthoFinder/' + f for f in os.listdir(prot_directory + 'OrthoFinder/') if
 			 f.startswith('Results')][0]) + '/'
 		os.system('mv %s %s' % (tmp_orthofinder_dir, orthofinder_outdir))
 		main_file = orthofinder_outdir + 'Orthogroups/Orthogroups.tsv'
@@ -1912,98 +972,47 @@ def runOrthoFinder2(bgc_prot_directory, orthofinder_outdir, logObject, cpus=1):
 		raise RuntimeError(traceback.format_exc())
 	return result_file
 
-
-def runSonicParanoid2(bgc_prot_directory, sonicparanoid_outdir, logObject, cpus=1):
-	result_file = sonicparanoid_outdir + 'Final_Orthogroups.tsv'
-	try:
-		sonicparanoid_cmd = ['sonicparanoid', '-i', bgc_prot_directory, '-o', sonicparanoid_outdir, '-p',
-							 'sonicparanoid2_for_lsabgc', '-t', str(cpus)]
-
-		logObject.info('Running the following command: %s' % ' '.join(sonicparanoid_cmd))
-		subprocess.call(' '.join(sonicparanoid_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-						executable='/bin/bash')
-		logObject.info('Successfully ran SonicParanoid!')
-
-		main_orthology_subdir = sonicparanoid_outdir + 'runs/sonicparanoid2_for_lsabgc/ortholog_groups/'
-		main_file = main_orthology_subdir + 'flat.ortholog_groups.tsv'
-		singletons_file = main_orthology_subdir + 'not_assigned_genes.ortholog_groups.tsv'
-
-		result_handle = open(result_file, 'w')
-		genomes = []
-		hog_id = 0
-		with open(main_file) as omf:
-			for i, line in enumerate(omf):
-				line = line.strip('\n')
-				ls = line.split('\t')
-				if i == 0:
-					genomes = ['.'.join(f.split('.')[:-1]) for f in ls[1:]]
-					result_handle.write('Orthogroup\t' + '\t'.join(genomes) + '\n')
-				else:
-					hog = 'OG_' + ls[0]
-					hog_id = int(ls[0])
-					updated_row = [hog]
-					for val in ls[1:]:
-						valjoined = ''
-						if val.strip() != '*':
-							valsplit = val.split(',')
-							valjoined = ', '.join(valsplit)
-						updated_row.append(valjoined)
-					result_handle.write('\t'.join(updated_row) + '\n')
-
-		genome_singletons = defaultdict(list)
-		curr_genome = None
-		curr_genes = []
-		with open(singletons_file) as osf:
-			for line in osf:
-				line = line.strip()
-				if line == '': continue
-				if line.startswith('#'):
-					if len(curr_genes) > 0:
-						genome_singletons[curr_genome] = curr_genes
-					curr_genome = '.'.join(line[1:].split('.')[:-1])
-					curr_genes = []
-				else:
-					curr_genes.append(line)
-		if len(curr_genes) > 0:
-			genome_singletons[curr_genome] = curr_genes
-
-		for i, g in enumerate(genomes):
-			for gene in genome_singletons[g]:
-				hog_id += 1
-				printlist = ['OG_' + str(hog_id)]
-				printlist += ['']*i + [gene] + ['']*(len(genomes)-i-1)
-				result_handle.write('\t'.join(printlist) + '\n')
-		result_handle.close()
-
-		assert (os.path.isfile(result_file))
-	except Exception as e:
-		logObject.error("Problem with running SonicParanoid2 cmd: %s." % ' '.join(sonicparanoid_cmd))
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-	return result_file
-
-def runPanaroo(genbanks_directory, panaroo_input_dir, results_directory, logObject, cpus=1, panaroo_options='--clean-mode moderate --remove-invalid-genes'):
+def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, logObject, threads=1, panaroo_options='--clean-mode moderate --remove-invalid-genes'):
 	result_file = results_directory + 'Final_Orthogroups.tsv'
 	try:
+		sample_genomes = {}
+		with open(detailed_BGC_listing_file) as odlf:
+			for line in odlf:
+				line = line.strip()
+				sample, _, genome_gbk = line.split('\t')[:3]
+				sample_genomes[sample] = genome_gbk
+
 		reformat_cmds = []
 		panaroo_inputs = []
-		for f in os.listdir(genbanks_directory):
-			inf = genbanks_directory + f
-			outf = panaroo_input_dir + '.'.join(f.split('.')[:-1]) + '.gff'
+		for sample in sample_genomes:
+			inf = sample_genomes[sample]
+			outf = panaroo_input_dir + '.'.join(inf.split('/')[-1].split('.')[:-1]) + '.gff'
 			reformat_cmd = ['genbankToProkkaGFF.py', '-i', inf, '-o', outf, logObject]
 			reformat_cmds.append(reformat_cmd)
 			panaroo_inputs.append(outf)
 
-		p = multiprocessing.Pool(cpus)
-		p.map(multiProcess, reformat_cmds)
-		p.close()
+		try:
+			p = multiprocessing.Pool(threads)
+			p.map(multiProcess, reformat_cmds)
+			p.close()
+		except:
+			msg = 'Issues creating Prokka-like GFF files for Panaroo.'
+			sys.stderr.write(msg + '\n')
+			logObject.error(msg)
+			sys.exit(1)
 
-		panaroo_cmd = ['panaroo', '-t', str(cpus), panaroo_options, '-i', ' '.join(panaroo_inputs), '-o', results_directory]
+		panaroo_cmd = ['panaroo', '-t', str(threads), panaroo_options, '-i', ' '.join(panaroo_inputs), '-o', results_directory]
 
-		logObject.info('Running the following command: %s' % ' '.join(panaroo_cmd))
-		subprocess.call(' '.join(panaroo_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-						executable='/bin/bash')
-		logObject.info('Successfully ran Panaroo!')
+		try:
+			logObject.info('Running the following command: %s' % ' '.join(panaroo_cmd))
+			subprocess.call(' '.join(panaroo_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+							executable='/bin/bash')
+			logObject.info('Successfully ran Panaroo!')
+		except:
+			msg = 'Issue running Panaroo with the following command: %s' % ' '.join(panaroo_cmd)
+			sys.stderr.write(msg + '\n')
+			logObject.error(msg)
+			sys.exit(1)
 
 		main_ortho_file = results_directory + 'gene_presence_absence.csv'
 		
@@ -2021,624 +1030,18 @@ def runPanaroo(genbanks_directory, panaroo_input_dir, results_directory, logObje
 
 		assert (os.path.isfile(result_file))
 	except Exception as e:
-		logObject.error("Problem with running Panaroo cmd: %s." % ' '.join(panaroo_cmd))
+		msg = "Problem with determining orthogroups using Panaroo."
+		logObject.error(msg)
 		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
+		sys.stderr.write(msg + '\n')
+
 	return result_file
 
-def determineParalogyThresholds(orthofinder_bgc_matrix_file, bgc_prot_directory, blast_directory, logObject, cpus=1):
-	paralogy_thresholds = defaultdict(
-		lambda: [90.0, 90.0])  # item 1 : percent identiy threshold; item 2 : query coverage threshold
-	samp_hg_lts = defaultdict(lambda: defaultdict(set))
-	lt_to_hg = {}
-	# create homolog group fasta files
-	try:
-		tmp_hg_seq_dir = blast_directory + 'HG_FASTAs_tmp/'
-		if not os.path.isdir(tmp_hg_seq_dir):
-			os.system('mkdir %s' % tmp_hg_seq_dir)
-
-		prot_lt_to_seq = {}
-		for f in os.listdir(bgc_prot_directory):
-			if not f.endswith('.faa'): continue
-			with open(bgc_prot_directory + f) as obpdf:
-				for rec in SeqIO.parse(obpdf, 'fasta'):
-					prot_lt_to_seq[rec.id] = str(rec.seq)
-
-		samples = []
-		with open(orthofinder_bgc_matrix_file) as oobmf:
-			for i, line in enumerate(oobmf):
-				line = line.strip('\n')
-				ls = line.split('\t')
-				if i == 0:
-					samples = ls[1:]
-				else:
-					hg = ls[0]
-					hg_fasta_file = tmp_hg_seq_dir + hg + '.faa'
-					hg_fasta_handle = open(hg_fasta_file, 'w')
-					for j, lts in enumerate(ls[1:]):
-						for lt in lts.split(','):
-							lt = lt.strip()
-							if lt == '': continue
-							samp = samples[j]
-							samp_hg_lts[samp][hg].add(lt)
-							lt_to_hg[lt] = hg
-							hg_fasta_handle.write('>' + lt + '\n' + prot_lt_to_seq[lt] + '\n')
-					hg_fasta_handle.close()
-	except Exception as e:
-		logObject.error("Problem with processing OrthoFinder matrix: %s." % orthofinder_bgc_matrix_file)
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-	# run diamond self alignment of HG FASTAs
-	try:
-		tmp_hg_dia_dir = blast_directory + 'HG_Self_Alignment/'
-		if not os.path.isdir(tmp_hg_dia_dir):
-			os.system('mkdir %s' % tmp_hg_dia_dir)
-
-		diamond_db_cmds = []
-		diamond_bp_cmds = []
-		for f in os.listdir(tmp_hg_seq_dir):
-			hg = f.split('.faa')[0]
-			hg_fasta_file = tmp_hg_seq_dir + f
-			hg_diamond_db = tmp_hg_seq_dir + hg
-			hg_diamond_tsv = tmp_hg_dia_dir + hg + '.tsv'
-
-			diamond_makedb_cmd = ['diamond', 'makedb', '--in', hg_fasta_file, '-d', hg_diamond_db, logObject]
-			diamond_blastp_cmd = ['diamond', 'blastp', '-p', '1', '-d', hg_diamond_db, '-q', hg_fasta_file, '-o',
-								  hg_diamond_tsv,
-								  '-f',
-								  '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovhsp',
-								  logObject]
-
-			diamond_db_cmds.append(diamond_makedb_cmd)
-			diamond_bp_cmds.append(diamond_blastp_cmd)
-
-		p = multiprocessing.Pool(cpus)
-		p.map(multiProcess, diamond_db_cmds)
-		p.close()
-
-		p = multiprocessing.Pool(cpus)
-		p.map(multiProcess, diamond_bp_cmds)
-		p.close()
-
-	except Exception as e:
-		logObject.error("Problem with running Diamond self-alignment of homolog group protein instance FASTAs.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-	try:
-		for f in os.listdir(tmp_hg_dia_dir):
-			hg = f.split('.tsv')[0]
-			hg_diamond_tsv = tmp_hg_dia_dir + f
-			assert (os.path.isfile(hg_diamond_tsv))
-			best_alignments_between_proteins = defaultdict(lambda: [0.0, None, None])
-			with open(hg_diamond_tsv) as ohdt:
-				for line in ohdt:
-					line = line.strip()
-					ls = line.split('\t')
-					query = ls[0]
-					subject = ls[1]
-					if query == subject: continue
-					pair = '|'.join(sorted([query, subject]))
-					pident = float(ls[2])
-					qcovhsp = float(ls[-1])
-					bitscore = float(ls[-2])
-					if bitscore > best_alignments_between_proteins[pair][0]:
-						best_alignments_between_proteins[pair] = [bitscore, pident, qcovhsp]
-
-			min_bitscore = 100000.0
-			for pair in best_alignments_between_proteins:
-				bitscore, pident, qcovhsp = best_alignments_between_proteins[pair]
-				if bitscore < min_bitscore:
-					min_bitscore = bitscore
-					paralogy_thresholds[hg] = [pident, qcovhsp]
-	except Exception as e:
-		logObject.error("Problem with parsing self alignment results." % orthofinder_bgc_matrix_file)
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-	os.system('rm -rf %s %s' % (tmp_hg_seq_dir, tmp_hg_dia_dir))
-	return [samp_hg_lts, lt_to_hg, paralogy_thresholds]
-
-
-def updateSampleGenomesWithGenbanks(genbanks_directory):
-	sample_genomes = {}
-	for f in os.listdir(genbanks_directory):
-		if not f.endswith('.gbk'): continue
-		gbk = genbanks_directory + f
-		sample = f.split('.gbk')[0]
-		sample_genomes[sample] = gbk
-	return sample_genomes
-
-
-def incorporateBGCProteinsIntoProteomesAndGenbanks(sample_bgc_proteins, sample_genomes, protein_annotations,
-												   bgc_prot_directory,
-												   proteomes_directory, final_proteomes_directory,
-												   final_genbanks_directory,
-												   sample_listing_file, bgc_listing_file, logObject):
-	sample_listing_handle = open(sample_listing_file, 'w')
-	bgc_listing_handle = open(bgc_listing_file, 'w')
-
-	try:
-		for sample in sample_genomes:
-
-			gw_prot_file = proteomes_directory + sample + '.faa'
-			gw_prot_to_location = {}
-			scaff_glts = defaultdict(set)
-			with open(gw_prot_file) as ogpf:
-				for rec in SeqIO.parse(ogpf, 'fasta'):
-					gw_prot_to_location[rec.id] = [rec.description.split()[1], int(rec.description.split()[2]),
-												   int(rec.description.split()[3])]
-					scaff_glts[rec.description.split()[1]].add(rec.id)
-
-			sample_lts_to_prune = set([])
-			sample_lts_to_add_protein_sequences = {}
-			sample_lts_to_add_genbank_features = defaultdict(list)
-
-			if sample in sample_bgc_proteins:
-				for bgc in sample_bgc_proteins[sample]:
-
-					bgc_listing_handle.write(sample + '\t' + bgc + '\n')
-
-					bgc_prots = sample_bgc_proteins[sample][bgc]
-					bgc_prots_1x = set([x for x in bgc_prots if x.split('_')[1][0] == '1'])
-
-					scaff_start = None
-					with open(bgc) as obf:
-						for rec in SeqIO.parse(obf, 'genbank'):
-							scaff_id = rec.id
-							scaff_start = int(rec.description.split()[-1].strip())
-							for feature in rec.features:
-								if feature.type == 'CDS':
-									prot_lt = feature.qualifiers.get('locus_tag')[0]
-									if prot_lt in bgc_prots_1x:
-										all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-										fls = []
-										for sc, ec, dc in all_coords:
-											dir = 1
-											if dc == '-': dir = -1
-											fls.append(FeatureLocation(sc - 1, ec, strand=dir))
-										feat_loc = fls[0]
-										if len(fls) > 1:
-											feat_loc = sum(fls)
-										feature.location = feat_loc
-										sample_lts_to_add_genbank_features[scaff_id].append(feature)
-
-					bgc_prot_file = bgc_prot_directory + sample + '.faa'
-					bgc_prot_to_location = {}
-					with open(bgc_prot_file) as obpf:
-						for rec in SeqIO.parse(obpf, 'fasta'):
-							bgc_prot_to_location[rec.id] = [rec.description.split()[1],
-															int(rec.description.split()[2]),
-															int(rec.description.split()[3])]
-							if rec.id in bgc_prots_1x:
-								sample_lts_to_add_protein_sequences[rec.id] = [
-									rec.id + ' ' + rec.description.split()[1] + ' ' + str(
-										int(rec.description.split()[2]) + scaff_start) + ' ' + str(
-										int(rec.description.split()[3]) + scaff_start), str(rec.seq)]
-
-					for blt in bgc_prots_1x:
-						blt_scaff, blt_start, blt_end = bgc_prot_to_location[blt]
-						blt_range = set(range(blt_start + scaff_start, blt_end + scaff_start + 1))
-						for glt in scaff_glts[blt_scaff]:
-							glt_scaff, glt_start, glt_end = gw_prot_to_location[glt]
-							glt_range = set(range(glt_start, glt_end + 1))
-							if glt_scaff == blt_scaff and float(len(blt_range.intersection(glt_range))) / float(
-									len(glt_range)) >= 0.25:
-								if not glt in bgc_prots:
-									sample_lts_to_prune.add(glt)
-
-			final_gw_sample_faa = final_proteomes_directory + sample + '.faa'
-			final_gw_sample_gbk = final_genbanks_directory + sample + '.gbk'
-
-			sample_listing_handle.write(sample + '\t' + final_gw_sample_gbk + '\t' + final_gw_sample_faa + '\n')
-
-			faa_handle = open(final_gw_sample_faa, 'w')
-			with open(proteomes_directory + sample + '.faa') as of:
-				for rec in SeqIO.parse(of, 'fasta'):
-					if not rec.id in sample_lts_to_prune:
-						faa_handle.write('>' + rec.description + '\n' + str(rec.seq) + '\n')
-			for rec in sample_lts_to_add_protein_sequences.items():
-				faa_handle.write('>' + rec[1][0] + '\n' + str(rec[1][1]) + '\n')
-			faa_handle.close()
-
-			gbk_handle = open(final_gw_sample_gbk, 'w')
-			og = None
-			if sample_genomes[sample].endswith('.gz'):
-				og = gzip.open(sample_genomes[sample], 'rt')
-			else:
-				og = open(sample_genomes[sample])
-			for rec in SeqIO.parse(og, 'genbank'):
-				updated_features = []
-				cds_iter = 0
-				starts = []
-				for feature in rec.features:
-					if feature.type == 'CDS':
-						prot_lt = feature.qualifiers.get('locus_tag')[0]
-						if protein_annotations == None or (not sample in protein_annotations):
-							feature.qualifiers['product'] = 'hypothetical protein'
-						else:
-							feature.qualifiers['product'] = [protein_annotations[sample][prot_lt]]
-						feature.qualifiers.move_to_end('translation')
-						if prot_lt in sample_lts_to_prune: continue
-						updated_features.append(feature)
-						all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-						starts.append([cds_iter, start])
-						cds_iter += 1
-				for feature in sample_lts_to_add_genbank_features[rec.id]:
-					if feature.type == 'CDS':
-						prot_lt = feature.qualifiers.get('locus_tag')[0]
-						if protein_annotations == None or (not sample in protein_annotations):
-							feature.qualifiers['product'] = 'hypothetical protein'
-						else:
-							feature.qualifiers['product'] = [protein_annotations[sample][prot_lt]]
-						feature.qualifiers.move_to_end('translation')
-						updated_features.append(feature)
-						all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-						starts.append([cds_iter, start])
-						cds_iter += 1
-				sorted_updated_features = []
-				for sort_i in sorted(starts, key=itemgetter(1)):
-					sorted_updated_features.append(updated_features[sort_i[0]])
-				rec.features = sorted_updated_features
-				SeqIO.write(rec, gbk_handle, 'genbank')
-		if og != None:
-			og.close()
-		gbk_handle.close()
-
-	except Exception as e:
-		logObject.error("Problem with creating updated.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-	sample_listing_handle.close()
-	bgc_listing_handle.close()
-
-
-def identifyParalogsAndCreateResultFiles(samp_hg_lts, lt_to_hg, sample_bgc_proteins, paralogy_thresholds,
-										 protein_annotations,
-										 bgc_prot_directory, blast_directory, proteomes_directory, sample_genomes,
-										 final_proteomes_directory,
-										 final_genbanks_directory, sample_listing_file, bgc_listing_file,
-										 orthofinder_matrix_file, logObject, cpus=1):
-	sample_listing_handle = open(sample_listing_file, 'w')
-	bgc_listing_handle = open(bgc_listing_file, 'w')
-	try:
-		tmp_diamond_dir = blast_directory + 'Diamond_BGC_to_GenomeWide_Proteomes_tmp/'
-		if not os.path.isdir(tmp_diamond_dir): os.system('mkdir %s' % tmp_diamond_dir)
-		diamond_db_cmds = []
-		diamond_bp_cmds = []
-		for f in os.listdir(proteomes_directory):
-			if not f.endswith('.faa'): continue
-			sample = f.split('.faa')[0]
-			gw_prot_file = proteomes_directory + f
-			bgc_prot_file = bgc_prot_directory + sample + '.faa'
-			diamond_db = tmp_diamond_dir + sample
-			diamond_tsv = tmp_diamond_dir + sample + '.tsv'
-
-			diamond_makedb_cmd = ['diamond', 'makedb', '--in', gw_prot_file, '-d', diamond_db, logObject]
-			diamond_blastp_cmd = ['diamond', 'blastp', '-p', '1', '-d', diamond_db, '-q', bgc_prot_file, '-o',
-								  diamond_tsv, '-f',
-								  '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovhsp',
-								  logObject]
-
-			diamond_db_cmds.append(diamond_makedb_cmd)
-			diamond_bp_cmds.append(diamond_blastp_cmd)
-
-		p = multiprocessing.Pool(cpus)
-		p.map(multiProcess, diamond_db_cmds)
-		p.close()
-
-		p = multiprocessing.Pool(cpus)
-		p.map(multiProcess, diamond_bp_cmds)
-		p.close()
-
-	except Exception as e:
-		logObject.error(
-			"Problem with running diamond alignments between BGC proteins and genome-wide proteomes for samples.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-	try:
-		for f in os.listdir(tmp_diamond_dir):
-			if not f.endswith('.tsv'): continue
-			sample = f.split('.tsv')[0]
-			diamond_tsv_file = tmp_diamond_dir + f
-			hg_queries = defaultdict(set)
-			hg_subjects = defaultdict(set)
-			with open(diamond_tsv_file) as odtf:
-				for line in odtf:
-					line = line.strip()
-					ls = line.split('\t')
-					query = ls[0]
-					query_hg = lt_to_hg[query]
-					subject = ls[1]
-					pident = float(ls[2])
-					qcovhsp = float(ls[-1])
-					hg_queries[query_hg].add(query)
-					if pident >= paralogy_thresholds[query_hg][0] and qcovhsp >= paralogy_thresholds[query_hg][1]:
-						hg_subjects[query_hg].add(subject)
-
-			gw_prot_file = proteomes_directory + sample + '.faa'
-			gw_prot_to_location = {}
-			with open(gw_prot_file) as ogpf:
-				for rec in SeqIO.parse(ogpf, 'fasta'):
-					gw_prot_to_location[rec.id] = [rec.description.split()[1], int(rec.description.split()[2]),
-												   int(rec.description.split()[3])]
-
-			sample_lts_to_prune = set([])
-			sample_lts_to_add_protein_sequences = {}
-			sample_lts_to_add_genbank_features = defaultdict(list)
-			for bgc in sample_bgc_proteins[sample]:
-
-				bgc_listing_handle.write(sample + '\t' + bgc + '\n')
-
-				bgc_prots = sample_bgc_proteins[sample][bgc]
-				bgc_prots_1x = set([x for x in bgc_prots if x.split('_')[1][0] == '1'])
-
-				bgc_prot_file = bgc_prot_directory + sample + '.faa'
-				bgc_prot_to_location = {}
-				with open(bgc_prot_file) as obpf:
-					for rec in SeqIO.parse(obpf, 'fasta'):
-						bgc_prot_to_location[rec.id] = [rec.description.split()[1],
-														int(rec.description.split()[2]),
-														int(rec.description.split()[3])]
-						if rec.id in bgc_prots_1x:
-							sample_lts_to_add_protein_sequences[rec.id] = [rec.description, str(rec.seq)]
-
-				with open(bgc) as obf:
-					for rec in SeqIO.parse(obf, 'genbank'):
-						scaff_id = rec.id
-						scaff_start = int(rec.description.split()[-1].strip())
-						for feature in rec.features:
-							if feature.type == 'CDS':
-								prot_lt = feature.qualifiers.get('locus_tag')[0]
-								if not prot_lt in bgc_prots_1x: continue
-								all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-								fls = []
-								for sc, ec, dc in all_coords:
-									dir = 1
-									if dc == '-': dir = -1
-									fls.append(FeatureLocation(sc - 1, ec, strand=dir))
-								feat_loc = fls[0]
-								if len(fls) > 1:
-									feat_loc = sum(fls)
-								feature.location = feat_loc
-								sample_lts_to_add_genbank_features[scaff_id].append(feature)
-
-				for hg in hg_queries:
-					bgc_hg_lts = hg_queries[hg].intersection(bgc_prots)
-					gw_hg_lts = hg_subjects[hg].difference(hg_queries[hg])
-					for glt in gw_hg_lts:
-						glt_scaff, glt_start, glt_end = gw_prot_to_location[glt]
-						glt_range = set(range(glt_start, glt_end + 1))
-						for blt in bgc_hg_lts:
-							if blt.split('_')[1][0] == '0': continue
-							blt_scaff, blt_start, blt_end = bgc_prot_to_location[blt]
-							blt_range = set(range(blt_start, blt_end + 1))
-							if glt_scaff == blt_scaff and float(len(blt_range.intersection(glt_range))) / float(
-									len(glt_range)) >= 0.25:
-								sample_lts_to_prune.add(glt)
-
-			final_gw_sample_faa = final_proteomes_directory + sample + '.faa'
-			final_gw_sample_gbk = final_genbanks_directory + sample + '.gbk'
-
-			sample_listing_handle.write(sample + '\t' + final_gw_sample_gbk + '\t' + final_gw_sample_faa + '\n')
-
-			faa_handle = open(final_gw_sample_faa, 'w')
-			with open(proteomes_directory + sample + '.faa') as of:
-				for rec in SeqIO.parse(of, 'fasta'):
-					if not rec.id in sample_lts_to_prune:
-						faa_handle.write('>' + rec.description + '\n' + str(rec.seq) + '\n')
-			for rec in sample_lts_to_add_protein_sequences.items():
-				faa_handle.write('>' + rec[1][0] + '\n' + str(rec[1][1]) + '\n')
-			faa_handle.close()
-
-			gbk_handle = open(final_gw_sample_gbk, 'w')
-			og = None
-			if sample_genomes[sample].endswith('.gz'):
-				og = gzip.open(sample_genomes[sample], 'rt')
-			else:
-				og = open(sample_genomes[sample])
-			for rec in SeqIO.parse(og, 'genbank'):
-				updated_features = []
-				cds_iter = 0
-				starts = []
-				for feature in rec.features:
-					if feature.type == 'CDS':
-						prot_lt = feature.qualifiers.get('locus_tag')[0]
-						if protein_annotations == None:
-							feature.qualifiers['product'] = 'hypothetical protein'
-						else:
-							feature.qualifiers['product'] = [protein_annotations[sample][prot_lt]]
-						feature.qualifiers.move_to_end('translation')
-						if prot_lt in sample_lts_to_prune: continue
-						updated_features.append(feature)
-						all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-						starts.append([cds_iter, start])
-						cds_iter += 1
-				for feature in sample_lts_to_add_genbank_features[rec.id]:
-					if feature.type == 'CDS':
-						prot_lt = feature.qualifiers.get('locus_tag')[0]
-						if protein_annotations == None:
-							feature.qualifiers['product'] = 'hypothetical protein'
-						else:
-							feature.qualifiers['product'] = [protein_annotations[sample][prot_lt]]
-						feature.qualifiers.move_to_end('translation')
-						updated_features.append(feature)
-						all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feature.location))
-						starts.append([cds_iter, start])
-						cds_iter += 1
-				sorted_updated_features = []
-				for sort_i in sorted(starts, key=itemgetter(1)):
-					sorted_updated_features.append(updated_features[sort_i[0]])
-				rec.features = sorted_updated_features
-				SeqIO.write(rec, gbk_handle, 'genbank')
-			og.close()
-			gbk_handle.close()
-
-			for hg in samp_hg_lts[sample]:
-				updated_lts = set(samp_hg_lts[sample][hg])
-				for lt in hg_subjects[hg].difference(hg_queries[hg]):
-					if not lt in sample_lts_to_prune:
-						updated_lts.add(lt)
-				samp_hg_lts[sample][hg] = updated_lts
-
-	except Exception as e:
-		logObject.error("Problem with creating updated.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-	try:
-		all_hgs = set([])
-		for s in samp_hg_lts:
-			for h in samp_hg_lts[s]:
-				all_hgs.add(h)
-
-		orthofinder_matrix_handle = open(orthofinder_matrix_file, 'w')
-		orthofinder_matrix_handle.write('Orthogroup\t' + '\t'.join([sample for sample in sorted(samp_hg_lts)]) + '\n')
-		for hg in sorted(all_hgs):
-			hg_row = [hg]
-			for sample in sorted(samp_hg_lts):
-				hg_row.append(', '.join(samp_hg_lts[sample][hg]))
-			orthofinder_matrix_handle.write('\t'.join(hg_row) + '\n')
-		orthofinder_matrix_handle.close()
-
-	except Exception as e:
-		logObject.error("Problem with updating OrthoFinder2 sample vs. homolog group matrix.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-	sample_listing_handle.close()
-	bgc_listing_handle.close()
-
-
-def createGCFListingsDirectory(sample_bgcs, bgc_to_sample, bigscape_results_dir, gcf_listings_directory, logObject):
-	try:
-		final_stats_file = '/'.join(gcf_listings_directory.split('/')[:-2]) + '/GCF_Details.txt'
-		sf_handle = open(final_stats_file, 'w')
-		sf_handle.write('\t'.join(['GCF id', 'number of BGCs', 'number of samples', 'samples with multiple BGCs in GCF',
-								   'size of the SCC', 'mean number of OGs', 'stdev for number of OGs',
-								   'min pairwise Jaccard similarity', 'max pairwise Jaccard similarity',
-								   'number of core gene aggregates', 'annotations']) + '\n')
-		bgc_paths = {}
-		for sample in sample_bgcs:
-			for bgc in sample_bgcs[sample]:
-				bgc_paths[bgc.split('/')[-1].split('.gbk')[0]] = [sample, bgc]
-
-		nf_bigscape_results_dir = bigscape_results_dir + 'network_files/'
-		assert (os.path.isdir(nf_bigscape_results_dir))
-		newest_date = [0, 0, 0]
-		newest_time = [0, 0, 0]
-		most_recent_results_dir = None
-		for sd in os.listdir(nf_bigscape_results_dir):
-			full_sd_dir = nf_bigscape_results_dir + sd + '/'
-			if not os.path.isdir(full_sd_dir): continue
-			date = [int(x) for x in sd.split('_')[0].split('-')]
-			time = [int(x) for x in sd.split('_')[1].split('-')]
-			if date[0] > newest_date[0] or (date[0] == newest_date[0] and date[1] > newest_date[1]) or (
-					date[0] == newest_date[0] and date[1] == newest_date[1] and date[2] > newest_date[2]):
-				newest_date = date
-				newest_time = time
-				most_recent_results_dir = full_sd_dir
-			elif date[0] == newest_date[0] and date[1] == newest_date[1] and date[2] == newest_date[2]:
-				if time[0] > newest_time[0] or (time[0] == newest_time[0] and time[1] > newest_time[1]) or (
-						time[0] == newest_time[0] and time[1] == newest_time[1] and time[2] > newest_time[2]):
-					newest_date = date
-					newest_time = time
-					most_recent_results_dir = full_sd_dir
-		assert (os.path.isdir(most_recent_results_dir))
-
-		gcfs = defaultdict(set)
-		gcf_classes = defaultdict(set)
-		for sd in os.listdir(most_recent_results_dir):
-			class_sd = most_recent_results_dir + sd + '/'
-			if not os.path.isdir(class_sd): continue
-			for f in os.listdir(class_sd):
-				if not (f.endswith('.tsv') and '_clustering_' in f): continue
-				bgc_class = f.split('_clustering_')[0]
-				class_gcf_file = class_sd + f
-				with open(class_gcf_file) as ocgf:
-					for i, line in enumerate(ocgf):
-						if i == 0: continue
-						line = line.strip()
-						ls = line.split('\t')
-						if ls[0] in bgc_paths and os.path.isfile(bgc_paths[ls[0]][1]):
-							gcfs[ls[1]].add(ls[0])
-							gcf_classes[ls[1]].add(bgc_class)
-
-		for gcf in gcfs:
-			gcf_file = gcf_listings_directory + 'GCF_' + gcf + '.txt'
-			gcf_handle = open(gcf_file, 'w')
-			samples_with_gcf = defaultdict(int)
-			for b in gcfs[gcf]:
-				bs = bgc_to_sample[bgc_paths[b][1]]
-				samples_with_gcf[bs] += 1
-				gcf_handle.write(bgc_paths[b][0] + '\t' + bgc_paths[b][1] + '\n')
-			gcf_handle.close()
-			samples_with_multiple_bgcs = 0
-			for s in samples_with_gcf:
-				if samples_with_gcf[s] > 1:
-					samples_with_multiple_bgcs += 1
-			"""
-			'GCF id', 'number of BGCs', 'number of samples', 'samples with multiple BGCs in GCF',
-					   'size of the SCC', 'mean number of OGs', 'stdev for number of OGs',
-					   'min pairwise Jaccard similarity', 'max pairwise Jaccard similarity',
-					   'number of core gene aggregates', 'annotations']) + '\n')
-			"""
-			sf_handle.write('\t'.join([str(x) for x in ['GCF_' + gcf, len(gcfs[gcf]), len(samples_with_gcf),
-														samples_with_multiple_bgcs, 'NA', 'NA', 'NA', 'NA', 'NA',
-														'NA', '; '.join(sorted(gcf_classes[gcf]))]]) + '\n')
-		sf_handle.close()
-	except Exception as e:
-		logObject.error("Problem with parsing BiG-SCAPE results directory provided.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-
-
-def updateBGCGenbanksToIncludeAnnotations(protein_annotations, bgc_to_sample, sample_bgc_proteins,
-										  antismash_bgcs_directory, antismash_bgcs_directory_updated, logObject):
-	sample_bgcs_updated = defaultdict(set)
-	bgc_to_sample_updated = {}
-	sample_bgc_proteins_update = defaultdict(lambda: defaultdict(set))
-	try:
-		for s in os.listdir(antismash_bgcs_directory):
-			os.system('mkdir %s' % (antismash_bgcs_directory_updated + s))
-			for f in os.listdir(antismash_bgcs_directory + s + '/'):
-				if not f.endswith('.gbk'): continue
-				sample = bgc_to_sample[antismash_bgcs_directory + s + '/' + f]
-				update_gbk_file = antismash_bgcs_directory_updated + s + '/' + f
-				ugf_handle = open(update_gbk_file, 'w')
-				with open(antismash_bgcs_directory + s + '/' + f) as oabduf:
-					for rec in SeqIO.parse(oabduf, 'genbank'):
-						updated_features = []
-						for feature in rec.features:
-							if feature.type == "CDS":
-								prot_lt = feature.qualifiers.get('locus_tag')[0]
-								feature.qualifiers['product'] = [protein_annotations[sample][prot_lt]]
-								feature.qualifiers.move_to_end('translation')
-								updated_features.append(feature)
-							else:
-								updated_features.append(feature)
-						rec.features = updated_features
-						SeqIO.write(rec, ugf_handle, 'genbank')
-				ugf_handle.close()
-				sample_bgcs_updated[s].add(update_gbk_file)
-				bgc_to_sample_updated[update_gbk_file] = s
-		for s in sample_bgc_proteins:
-			for bgc in sample_bgc_proteins[s]:
-				bgc_prots = sample_bgc_proteins[s][bgc]
-				new_bgc = antismash_bgcs_directory_updated + '/'.join(bgc.split('/')[-2:])
-				sample_bgc_proteins_update[s][new_bgc] = bgc_prots
-
-	except Exception as e:
-		logObject.error("Problem with updating AntiSMASH BGC Genbanks to feature KOfam annotations.")
-		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
-	return ([sample_bgcs_updated, bgc_to_sample_updated, sample_bgc_proteins_update])
-
-
 def selectFinalResultsAndCleanUp(outdir, fin_outdir, logObject):
+
+	""" 
+	TODO: Refactor for lsaBGC-PAN
+	"""
 	try:
 		delete_set = set(['BLASTing_of_Ortholog_Groups', 'OrthoFinder2_Results', 'KOfam_Annotations',
 						  'Prodigal_Gene_Calling_Additional', 'Predicted_Proteomes_Initial',
@@ -2700,7 +1103,6 @@ def p_adjust_bh(p):
 	steps = float(len(p)) / np.arange(len(p), 0, -1)
 	q = np.minimum(1, np.minimum.accumulate(steps * p[by_descend]))
 	return q[by_orig]
-
 
 def is_newick(newick):
 	"""
@@ -2820,85 +1222,7 @@ def logParametersToObject(logObject, parameter_names, parameter_values):
 		logObject.info(pn + ': ' + str(pv))
 
 
-def calculateTajimasD(sequences):
-	"""
-	The code for this functionality was largely taken from Tom Whalley's Tajima's D implementation in Python and further
-	modified/corrected based on Wikipedia's page for Tajima's D (Mathematical details).
-	"""
-
-	"""Calculate pi"""
-	numseqs = len(sequences)
-	divisor = math.comb(numseqs, 2)
-	combos = itertools.combinations(sequences, 2)
-	differences = 0
-	for pair in combos:
-		seqA = pair[0]
-		seqB = pair[1]
-		for p, a in enumerate(seqA):
-			b = seqB[p]
-			if a != b and a != '-' and b != '-':
-				differences += 1
-	pi = float(differences) / divisor
-
-	"""Calculate s, number of segregation sites)."""
-	# Assume if we're in here seqs have already been checked
-	combos = itertools.combinations(sequences, 2)
-	indexes = set([])
-	for pair in combos:
-		seqA = pair[0]
-		seqB = pair[1]
-		for idx, (i, j) in enumerate(zip(seqA, seqB)):
-			if i != j and i != '-' and j != '-':
-				indexes.add(idx)
-
-	indexes = list(indexes)
-	S = len(indexes)
-
-	"""
-	Now we have pi (pairwise differences) and s (number
-	of segregating sites). This gives us 'little d', so
-	now we need to divide it by sqrt of variance.
-	"""
-	l = len(sequences)
-
-	# calculate D
-	a1 = sum([(1.0 / float(i)) for i in range(1, l)])
-	a2 = sum([(1.0 / (i ** 2)) for i in range(1, l)])
-
-	b1 = float(l + 1) / (3 * (l - 1))
-	b2 = float(2 * ((l ** 2) + l + 3)) / (9 * l * (l - 1))
-
-	c1 = b1 - (1.0 / a1)
-	c2 = b2 - (float(l + 2) / (a1 * l)) + (float(a2) / (a1 ** 2.0))
-
-	e1 = float(c1) / a1
-	e2 = float(c2) / ((a1 ** 2) + a2)
-	if S >= 3:
-		D = (float(pi - (float(S) / a1)) / math.sqrt((e1 * S) + ((e2 * S) * (S - 1))))
-		return (D)
-	else:
-		return ("< 3 segregating sites")
-
-
-def is_numeric(x):
-	try:
-		x = float(x)
-		return True
-	except:
-		return False
-
-
-def castToNumeric(x):
-	try:
-		if x != '< 3 segregating sites':
-			x = float(x)
-			return(x)
-		else:
-			return(x)
-	except:
-		return float('nan')
-
-
+# TODO: refactor the following functions for lsaBGC-Pan 
 numeric_columns = set(['GCF Count', 'hg order index', 'hg consensus direction', 'median gene length',
 					   'proportion of samples with hg', 'proportion of total populations with hg',
 					   'hg median copy count', 'num of hg instances', 'samples with hg', 'ambiguous sites proporition',

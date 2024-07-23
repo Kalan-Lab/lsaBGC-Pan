@@ -10,8 +10,7 @@ import copy
 import _pickle as cPickle
 from lsaBGC import util
 
-lsaBGC_main_directory = '/'.join(os.path.realpath(__file__).split('/')[:-3])
-gecco_pickle_weights_file_file = lsaBGC_main_directory + '/db/GECCO_PF_Weights.pkl'
+gecco_pickle_weights_file_file = os.environ["GECCO_DOMAIN_WEIGHTS_PKL_FILE"]
 
 class BGC:
 	def __init__(self, bgc_genbank, bgc_id, is_expansion_bgc, prediction_method='ANTISMASH'):
@@ -221,7 +220,7 @@ class BGC:
 			for rec in SeqIO.parse(ogbk, 'genbank'):
 				for feature in rec.features:
 					if feature.type == "CDS":
-						feature.qualifiers.get('locus_tag')[0]
+						lt = feature.qualifiers.get('locus_tag')[0]
 						all_coords, start, end, direction, is_multi_part = util.parseCDSCoord(str(feature.location))
 
 						try:

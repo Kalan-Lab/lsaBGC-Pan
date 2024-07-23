@@ -1,0 +1,210 @@
+#!/usr/bin/env python
+
+### Program: popstrat
+### Author: Rauf Salamzade
+### Kalan Lab
+### UW Madison, Department of Medical Microbiology and Immunology
+
+# BSD 3-Clause License
+#
+# Copyright (c) 2022, Kalan-Lab
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import os
+import sys
+import argparse
+from collections import defaultdict
+from lsaBGC import util
+import itertools
+from time import sleep
+from ete3 import Tree
+import shutil
+
+IDENTITY_CUTOFFS = [80.0, 90.0, 95.0, 97.0, 98.0, 99.0, 99.5]
+
+def create_parser():
+	""" Parse arguments """
+	parser = argparse.ArgumentParser(description="""
+	Program: popstrat
+	Author: Rauf Salamzade
+	Affiliation: Kalan Lab, UW Madison, Department of Medical Microbiology and Immunology
+	*******************************************************************************************************************
+    popstrat will take an input alignment of proteins and determine populations based on average amino acid identity 
+    (AAI) cutoffs to determine populations. 
+	""", formatter_class=argparse.RawTextHelpFormatter)
+
+	parser.add_argument('-a', '--alignment', help='BiG-SCAPE Results directory.', required=True)
+	parser.add_argument('-p', '--phylogeny', help='A listing connecting sample names to full-genome GenBank files.', required=False, default=None)
+	parser.add_argument('-o', '--output_directory', help='Parent output/workspace directory.', required=True)
+	parser.add_argument('-t', '--test_parameters', action='store_true', help='Test cutoffs for AAI for grouping populations and create visuals showing them.', default=False, required=False)
+	parser.add_argument('-i', '--identity_cutoff', type=float, help='The AAI between [Default is 99.0]', default=99.0, required=False)
+	parser.add_argument('-s', '--skip_midpoint', action='store_true', help="Skip midpoint rooting of phylogeny - note tree should be rooted in some way for visualization!", required=False, default=False)
+	args = parser.parse_args()
+	return args
+
+def popstrat():
+	myargs = create_parser()
+
+	alignment_file = myargs.alignment
+	phylogeny_file = myargs.phylogeny 
+	outdir = myargs.output_directory
+	test_parameters = myargs.test_parameters 
+	identity_cutoff = myargs.identity_cutoff
+	skip_midpoint = myargs.skip_midpoint
+
+	if os.path.isdir(outdir):
+		sys.stderr.write("Output directory already exists! Overwriting in 5 seconds...\n")
+		sleep(5)
+	
+	util.setupReadyDirectory([outdir])
+	outdir = os.path.abspath(outdir) + '/'
+	
+	# Root species tree
+	rooted_species_tree_file = None 
+	if not skip_midpoint:
+		rooted_species_tree_file = outdir + 'Species_Phylogeny.Midpoint_Rooted.tre'
+		try:
+			t = Tree(phylogeny_file)
+			R = t.get_midpoint_outgroup()
+			t.set_outgroup(R)
+			t.write(format=1, outfile=rooted_species_tree_file)
+		except:
+			sys.stderr.write('Error: Issue midpoint rooting the species tree.')
+			sys.exit(1)
+	else:
+		rooted_species_tree_file = phylogeny_file
+
+	poplist_dir = outdir + 'Population_Listings/'
+	phylo_views_dir = outdir + 'Phylogenetic_Views/'
+	util.setupReadyDirectory([poplist_dir, phylo_views_dir])
+
+	cutoffs = [identity_cutoff]
+	if test_parameters:
+		if not identity_cutoff in IDENTITY_CUTOFFS:
+			cutoffs += IDENTITY_CUTOFFS
+		else:
+			cutoffs = IDENTITY_CUTOFFS
+
+	expected_similarities_file = outdir + 'Expected_Similarities.txt'
+
+	pair_seq_matching = util.determineSeqSimProteinAlignment(alignment_file)
+	expected_sim_handle = open(expected_similarities_file, 'w')
+	for s1 in pair_seq_matching:
+		for s2 in pair_seq_matching:
+			exp_sim = str(pair_seq_matching[s1][s2])
+			if s1 == s2: exp_sim = '1.0'
+			expected_sim_handle.write(s1 + '\t' + s2 + '\t' + exp_sim + '\n')
+	expected_sim_handle.close()
+
+	all_samples = set([])
+	population_pairs = defaultdict(list)
+	samples_in_population_pairs = defaultdict(set)
+	with open(expected_similarities_file) as oedf:
+		for line in oedf:
+			sample1, sample2, exsim = line.strip().split('\t')
+			exsim = float(exsim)
+			all_samples.add(sample1)
+			all_samples.add(sample2)
+			for ic in cutoffs:
+				if exsim >= (ic/100.0):
+					population_pairs[ic].append([sample1, sample2])
+					samples_in_population_pairs[ic].add(sample1)
+					samples_in_population_pairs[ic].add(sample2)
+
+	rscript_file = None
+	if phylogeny_file:
+		rscript_file = outdir + 'phylo_plotting.R'	
+		rscript_handle = open(rscript_file, 'w')	
+
+		rscript_handle.write('library(ggplot2)\n')
+		rscript_handle.write('library(ggtree)\n')
+		rscript_handle.write('library(gggenes)\n')
+		rscript_handle.write('library(ape)\n')
+		rscript_handle.write('library(phytools)\n')
+		rscript_handle.write('library(aplot)\n')
+		rscript_handle.write('library(plyr)\n\n')
+
+		rscript_handle.write('phylo.tree <- read.tree("' + rooted_species_tree_file + '")\n\n')
+	
+	phylo_view_files = []
+	for ic in cutoffs:
+		"""	
+		Solution for single-linkage clustering taken from mimomu's response in the stackoverflow page:
+		https://stackoverflow.com/questions/4842613/merge-lists-that-share-common-elements?lq=1
+		"""
+		L = list(population_pairs[ic])
+		LL = set(itertools.chain.from_iterable(L))
+		for each in LL:
+			components = [x for x in L if each in x]
+			for i in components:
+				L.remove(i)
+			L += [list(set(itertools.chain.from_iterable(components)))]
+
+		for s in all_samples:
+			if not s in samples_in_population_pairs[ic]:
+				L.append([s])
+
+		population_spec_file = poplist_dir + 'Sample_to_Population_' + str(ic) + '.txt'
+		pop_spec_handle = open(population_spec_file, 'w')
+		pop_spec_handle.write('name\tpopulation\n')
+		for i, sc in enumerate(L):
+			pop_id = 'Clade_' + str(i+1)
+			for s in sc:
+				pop_spec_handle.write(s + '\t' + pop_id + '\n')
+		pop_spec_handle.close()
+
+		if rscript_file != None:
+			phylo_view_pdf_file = phylo_views_dir + 'Phylo_View_of_Population_Designations_' + str(ic) + '.pdf'
+
+			rscript_handle.write('track.data <- read.table("' + population_spec_file + '", header=F, sep="\t")\n')
+			rscript_handle.write('colnames(track.data) <- c("name", "population")\n')
+			rscript_handle.write('tree.labels <- phylo.tree$tip.label\n')
+			rscript_handle.write('gg_tr <- ggtree(phylo.tree) + geom_tiplab() + ggtitle("Identity Cutoff' + str(ic) + '")\n')
+			rscript_handle.write('gg_tr <- gg_tr %<+% track.data + geom_tippoint(aes(color=as.factor(population)), show.legend=T, size=3)\n')
+			rscript_handle.write('pdf("' + phylo_view_pdf_file + '", height=10, width=10)\n')
+			rscript_handle.write('gg_tr + coord_cartesian(clip="off")\n')
+			rscript_handle.write('dev.off()\n\n')
+
+			phylo_view_files.append(phylo_view_pdf_file)
+
+	if rscript_file != None:
+		rscript_handle.close()
+		rscript_cmd = ['Rscript', rscript_file]
+		util.runCmdViaSubprocess(rscript_cmd, check_files=phylo_view_files)
+
+	try:
+		shutil.copy2(poplist_dir + 'Sample_to_Population_' + str(identity_cutoff) + '.txt', outdir + 'Sample_to_Population.txt')
+	except:
+		msg = 'Issue copying over the selected identity cutoff results to the main output directory.'
+		sys.stderr.write(msg + '\n')
+		
+	# Done!
+	sys.exit(0)
+
+if __name__ == '__main__':
+	popstrat()

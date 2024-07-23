@@ -1,0 +1,225 @@
+#!/usr/bin/env python
+
+### Program: phylogenate
+### Author: Rauf Salamzade
+### Kalan Lab
+### UW Madison, Department of Medical Microbiology and Immunology
+
+# BSD 3-Clause License
+#
+# Copyright (c) 2022, Kalan-Lab
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import os
+import sys
+import argparse
+from lsaBGC import util
+import traceback
+from collections import defaultdict
+from Bio import SeqIO
+from time import sleep
+import multiprocessing
+import math
+
+def create_parser():
+	""" Parse arguments """
+	parser = argparse.ArgumentParser(description="""
+	Program: phylogenate
+	Author: Rauf Salamzade
+	Affiliation: Kalan Lab, UW Madison, Department of Medical Microbiology and Immunology
+	*******************************************************************************************************************
+	phylogenate creates a species tree from (near-)single copy core ortholog groups.
+	
+	high-quality mode uses muscle align instead of super5 and IQ-TREE with substitution models limited to LG, WAG.
+	""", formatter_class=argparse.RawTextHelpFormatter)
+
+	parser.add_argument('-m', '--orthogroup_matrix', help='BiG-SCAPE Results directory.', required=False, default=None)
+	parser.add_argument('-i', '--genome_genbanks', help='A listing connecting sample names to full-genome GenBank files.', required=False, default=None)
+	parser.add_argument('-p', '--core_proportion', type=float, help='Proportion of genomes with single-copy orthogroup needed to be considered as part of core and used for phylogeny construction [Default is 1.0].', required=False, default=1.0)
+	parser.add_argument('-o', '--output_directory', help='Parent output/workspace directory.', required=True)
+	parser.add_argument('-hq', '--high_quality', action='store_true', help='Prioritize phylogeny accuracy over speed of construction. Uses muscle align instead of muscle super5 and IQ-TREE instead of FastTree2.', default=False, required=False)
+	parser.add_argument('-c', '--threads', type=int, help="Total number of threads/threads. Note, this is the total number of\nthreads to use. (Default is 1)", required=False, default=4)
+
+	args = parser.parse_args()
+	return args
+
+def phylogenate():
+	myargs = create_parser()
+
+	orthogroup_matrix_file = myargs.orthogroup_matrix
+	genome_genbanks_listing_file = myargs.genome_genbanks
+	outdir = os.path.abspath(myargs.output_directory) + '/'
+	core_proportion = myargs.core_proportion
+	high_qual_flag = myargs.high_quality
+	threads = myargs.threads
+
+	if os.path.isdir(outdir):
+		sys.stderr.write("Output directory already exists! Overwriting in 5 seconds...\n")
+		sleep(5)
+	util.setupReadyDirectory([outdir])
+	outdir = os.path.abspath(outdir) + '/'
+	
+	parallel_jobs_4thread = max(math.floor(threads / 4), 1)
+	multi_thread = 4
+	if threads < 4:
+		multi_thread = threads
+		parallel_jobs_4thread = 1
+
+	genomes = []
+	select_ogs = set([])
+	genome_lt_to_og = defaultdict(dict)
+	with open(orthogroup_matrix_file) as oomf:
+		for i, line in enumerate(oomf):
+			line = line.strip('\n')
+			ls = line.split('\t')
+			if i == 0:
+				genomes = ls[1:]
+			else:
+				og = ls[0]
+				sc = True
+				genomes_with = 0
+
+				for lts in ls[1:]:
+					if lts.strip() == '': continue
+					genomes_with += 1
+					if len(lts.split(', ')) > 1:
+						sc = False
+						break				
+				if not sc: continue
+				genome_prop = genomes_with/float(len(genomes))
+				if genome_prop >= core_proportion:
+					select_ogs.add(og)
+					for j, lts in enumerate(ls[1:]):
+						if lts.strip() == '': continue
+						genome = genomes[j]
+						genome_lt_to_og[genome][lts.strip()] = og
+
+	all_genomes = set(genomes)
+
+	msg = 'Found %d ortholog groups as (near-)single-copy core (found in %f%% of genomes).\n' % (len(select_ogs), (core_proportion*100.0))
+	sys.stdout.write(msg)
+	
+	prot_dir = outdir + 'OG_FASTAs/'
+	msa_dir = outdir + 'OG_MSA_FASTAs/'
+	trim_dir = outdir + 'Trimmed_OG_MSA_FASTAs/'
+
+	util.setupReadyDirectory([prot_dir, msa_dir, trim_dir])
+
+	with open(genome_genbanks_listing_file) as ogglf:
+		for line in ogglf:
+			line = line.strip()
+			sample, genome_gbk = line.split('\t')
+			with open(genome_gbk) as ogg:
+				for rec in SeqIO.parse(ogg, 'genbank'):
+					for feat in rec.features:
+						if feat.type == 'CDS':
+							lt = feat.qualifiers.get('locus_tag')[0]
+							prot_seq = feat.qualifiers.get('translation')[0]
+							if lt in genome_lt_to_og[sample]:
+								og = genome_lt_to_og[sample][lt]
+								og_prot_faa = prot_dir + og + '.faa'
+								opf_handle = open(og_prot_faa, 'a+')
+								opf_handle.write('>' + sample + '\n' + str(prot_seq) + '\n')
+								opf_handle.close()
+	
+	muscle_cmds = []
+	trimal_cmds = []
+	for f in os.listdir(prot_dir):
+		og_name = '.'.join(f.split('.')[:-1])
+		prot_faa_file = prot_dir + f
+		prot_msa_file = msa_dir + og_name + '.msa.faa'
+		prot_trim_file = trim_dir  + og_name + '.msa.trimmed.faa'
+		
+		muscle_cmd = ['muscle', '-super5', prot_faa_file, '-amino', '-output', prot_msa_file, '-threads', str(multi_thread)]
+		if high_qual_flag:
+			muscle_cmd = ['muscle', '-align', prot_faa_file, '-amino', '-output', prot_msa_file, '-threads', str(multi_thread)]
+		trimal_cmd = ['trimal', '-in', prot_msa_file, '-out', prot_trim_file, '-strict']
+		muscle_cmds.append(muscle_cmd)
+		trimal_cmds.append(trimal_cmd)
+
+	try:
+		p = multiprocessing.Pool(parallel_jobs_4thread)
+		p.map(util.multiProcessNoLog, muscle_cmds)
+		p.close()
+	except Exception as e:
+		msg = 'Issues running muscle in parallel!\n'
+		sys.stderr.write(msg)
+		sys.stderr.write(traceback.format_exc())
+		sys.exit(1)
+
+	try:
+		p = multiprocessing.Pool(threads)
+		p.map(util.multiProcessNoLog, trimal_cmds)
+		p.close()
+	except Exception as e:
+		msg = 'Issues running trimal in parallel.\n'
+		sys.stderr.write(msg)
+		sys.stderr.write(traceback.format_exc())
+		sys.exit(1)
+
+	all_ogs = set([])
+	og_sequence_lengths = {}
+	genome_og_seqs = defaultdict(lambda: defaultdict(lambda: None))
+	for f in os.listdir(trim_dir):
+		trim_msa_file = trim_dir + f
+		og_name = f.split('.msa.trimmed.faa')[0]
+		all_ogs.add(og_name)
+		trim_msa_len = 0
+		with open(trim_msa_file) as otf:
+			for rec in SeqIO.parse(otf, 'fasta'):
+				trim_msa_len = len(str(rec.seq))
+				genome_og_seqs[rec.id][og] = str(rec.seq)
+		og_sequence_lengths[og_name] = trim_msa_len
+
+	concat_msa_file = outdir + 'Concatenated_MSA.fasta'
+	cmf_handle = open(concat_msa_file, 'w')
+	for genome in all_genomes:
+		concat_str = ''
+		for og in sorted(all_ogs):
+			if genome in genome_og_seqs and og in genome_og_seqs[genome]:
+				concat_str += genome_og_seqs[genome][og]
+			else:
+				concat_str += '-'*og_sequence_lengths[og]
+		cmf_handle.write('>' + genome + '\n' + concat_str + '\n')
+	cmf_handle.close()
+
+	if high_qual_flag:
+		# take iqtree approach
+		tree_file = outdir + 'Species_Phylogeny_IQTREE_Phylogeny_mset-WAG-LG_B-1000.treefile'
+		iqtree_cmd = ['iqtree2', '-Q', trim_dir, '-pre', outdir + 'Species_Phylogeny_IQTREE_Phylogeny_mset-WAG-LG_B-1000', '-B', '1000', '-mset', 'WAG,LG', '-nt', str(threads)]
+		util.runCmdViaSubprocess(iqtree_cmd, check_files=[tree_file])
+	else:
+		tree_file = outdir + 'Species_Phylogeny_FastTree2.treefile'
+		fasttree_cmd = ['fasttree', concat_msa_file, '>', tree_file]
+		util.runCmdViaSubprocess(fasttree_cmd, check_files=[tree_file])
+
+	# done!
+	sys.exit(0)
+
+if __name__ == '__main__':
+	phylogenate()

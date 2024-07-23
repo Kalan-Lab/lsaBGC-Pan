@@ -1,0 +1,344 @@
+#!/usr/bin/env python
+
+### Program: GSeeF.py
+### Author: Rauf Salamzade
+### Kalan Lab
+### UW Madison, Department of Medical Microbiology and Immunology
+
+# BSD 3-Clause License
+#
+# Copyright (c) 2022, Kalan-Lab
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import os
+import sys
+import argparse
+from lsaBGC import util
+from operator import itemgetter
+from collections import defaultdict
+from Bio import SeqIO
+from time import sleep
+import random
+from ete3 import Tree
+from lsaBGC import util
+
+SEED = 1234
+
+def create_parser():
+	""" Parse arguments """
+	parser = argparse.ArgumentParser(description="""
+	Program: GSeeF
+	Author: Rauf Salamzade
+	Affiliation: Kalan Lab, UW Madison, Department of Medical Microbiology and Immunology
+	*******************************************************************************************************************
+	GSeeF.py creates visualizations of GCF distributions across a species tree.
+								  
+	Note, this is a much simpler version of the original GSeeF.py from lsaBGC - which was able to work with BiG-SCAPE
+	results as well and create a species tree from scratch using GToTree. Here, a species tree is required as 
+	input and only lsaBGC-Cluster(-ing) results are supported.
+	""", formatter_class=argparse.RawTextHelpFormatter)
+
+	parser.add_argument('-g', '--lsabgc_detailed_listing', help='lsaBGC-Pan detailed listing with GCF and population structure information.', required=True)
+	parser.add_argument('-s', '--species_tree', help='Provide species tree in Newick format. If not provided will run GToTree to generate species phylogeny.', required=True)
+	parser.add_argument('-o', '--output_directory', help='Parent output/workspace directory.', required=True)
+	parser.add_argument('-m', '--max_gcfs', type=int, help='The maximum number of GCFs to consider (will prioritize inclusion of more common GCFs). (Default is no limit).', default=None, required=False)
+
+	args = parser.parse_args()
+	return args
+
+def GSeeF():
+	myargs = create_parser()
+
+	lsabgc_detailed_listing = myargs.lsabgc_detailed_listing
+	species_tree_file = myargs.species_tree
+	outdir = os.path.abspath(myargs.output_directory) + '/'
+	max_gcfs = myargs.max_gcfs
+	
+	if os.path.isdir(outdir):
+		sys.stderr.write("Output directory already exists! Overwriting in 5 seconds, but only where needed will use checkpoint files to skip certain steps...\n")
+		sleep(5)
+	else:
+		util.setupReadyDirectory([outdir])
+
+	final_results_dir = outdir + 'Final_Results/'
+	if not os.path.isdir(final_results_dir):
+		os.system('mkdir %s' % final_results_dir)
+
+	# create logging object
+	log_file = outdir + 'Progress.log'
+	logObject = util.createLoggerObject(log_file)
+	logObject.info("Saving command for future records.")
+	parameters_file = outdir + 'Command_Issued.txt'
+	parameters_handle = open(parameters_file, 'a+')
+	parameters_handle.write(' '.join(sys.argv) + '\n')
+	parameters_handle.close()
+	sys.stdout.write("Appending command issued for future records to: %s\n" % parameters_file)
+	sys.stdout.write("Logging more details at: %s\n" % parameters_file)
+
+	try:
+		assert(os.path.isfile(lsabgc_detailed_listing))
+	except:
+		msg = 'Issues with validating lsaBGC detailed listing file.'
+		sys.stderr.write(msg + '\n')
+		logObject.error(msg)
+		sys.exit(1)
+
+
+	# Step 1: Parse Clustering Results
+	logObject.info('\n---------------------\nStep 1\n---------------------\nParsing clustering results and gathering annotations from BGC Genbanks.')
+	sys.stdout.write('---------------------\nStep 1\n---------------------\nParsing clustering results and gathering annotations from BGC Genbanks.\n')
+
+	gcf_samples = defaultdict(set)
+	gcf_sample_annotations = defaultdict(lambda: defaultdict(set))
+	all_samples = set([])
+	try:
+		with open(lsabgc_detailed_listing) as oldl:
+			for i, line in enumerate(oldl):
+				if i == 0: continue
+				line = line.strip()
+				sample, population, method, genome_path, bgc_id, bgc_gbk, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+				gcf_samples[gcf_id].add(sample)
+				all_samples.add(sample)
+				if method.upper() == 'ANTISMASH':
+					bgc_annotation = parseAntiSMASHGBKForFunction(bgc_gbk, logObject)
+				elif method.upper() == 'GECCO':
+					bgc_annotation = parseGECCOGBKForFunction(bgc_gbk, logObject)
+				gcf_sample_annotations[gcf_id][sample].add(bgc_annotation)
+	except:
+		msg = 'Difficulty processing input listing file.'
+		sys.stderr.write(msg + '\n')
+		logObject.error(msg)		
+		sys.exit(1)
+
+	# Root species tree
+	rooted_species_tree_file = final_results_dir + 'Species_Phylogeny.Midpoint_Rooted.tre'
+	try:
+		t = Tree(species_tree_file)
+		R = t.get_midpoint_outgroup()
+		t.set_outgroup(R)
+		t.write(format=1, outfile=rooted_species_tree_file)
+	except:
+		sys.stderr.write('Error: Issue midpoint rooting the species tree.')
+		sys.exit(1)
+
+	all_annotation_classes = set(['unknown', 'multi-type'])
+	gs_annots = defaultdict(dict)
+	for gcf in gcf_sample_annotations:
+		all_gcf_annots = defaultdict(int)
+		for sample in gcf_sample_annotations[gcf]:
+			annotations = gcf_sample_annotations[gcf][sample]
+			annot = 'unknown'
+			if len(annotations) == 1:
+				annot = list(annotations)[0]
+			elif len(annotations) == 2 and 'NRPS' in annotations and 'NRPS-like' in annotations:
+				annot = 'NRPS'
+			elif len(annotations) >= 2:
+				annot = 'multi-type'
+			gs_annots[gcf][sample] = annot
+			all_annotation_classes.add(annot)
+			all_gcf_annots[annot] += 1
+
+	colorsbrewed_file = outdir + 'brewed_colors.txt'
+	util.generateColors(outdir, colorsbrewed_file, str(len(all_annotation_classes)-2))
+
+	colors = []
+	with open(colorsbrewed_file) as ocf:
+		colors = [x.strip() for x in ocf.readlines()]
+	random.Random(SEED).shuffle(colors)
+
+	annotation_colors = {}
+	ci = 0
+	for a in sorted(all_annotation_classes):
+		if a == 'multi-type':
+			annotation_colors[a] = '#000000'
+		elif a == 'unknown':
+			annotation_colors[a] = '#a2a4a6'
+		else:
+			annotation_colors[a] = colors[ci]
+			ci += 1
+
+	gcfs_order_index = {}
+	for gcf in gcf_samples:
+		gcfs_order_index[gcf] = len(gcf_samples[gcf])
+
+	gcf_order = []
+	for gcf_tup in sorted(gcfs_order_index.items(), key=itemgetter(1), reverse=True):
+		gcf_order.append(gcf_tup[0])
+
+	# Step 3: Create track files for Rscript and iTol
+	logObject.info('\n---------------------\nStep 3\n---------------------\nCreating track/input files for plotting.')
+	sys.stdout.write('---------------------\nStep 3\n---------------------\nCreating track/input files for plotting.\n')
+
+	## get samples in tree to consider when creating tracks
+	tree_samples = set([])
+	t = Tree(rooted_species_tree_file)
+	for node in t.traverse("postorder"):
+		if node.is_leaf: tree_samples.add(node.name)
+
+	itol_track_file = final_results_dir + 'GCF_Heatmap.iTol.txt'
+	itol_track_handle = open(itol_track_file, 'w')
+	gseef_track_file = outdir + 'gseef_track_input.txt'
+	gseef_track_handle = open(gseef_track_file, 'w')
+
+	itol_track_handle.write('DATASET_DOMAINS\n')
+	itol_track_handle.write('SEPARATOR TAB\n')
+	itol_track_handle.write('DATASET_LABEL\tGCFs\n')
+	itol_track_handle.write('COLOR\t#000000\n')
+	itol_track_handle.write('DATA\n')
+
+	gseef_track_handle.write('gcf\tgcf_index\tlabel\tannotation\tcolors\n')
+
+	tot_gcfs = len(gcf_order)
+	for sample in sorted(all_samples):
+		if not sample in tree_samples: continue
+		printlist = [sample, str(tot_gcfs)]
+		for i, gcf in enumerate(gcf_order):
+			if max_gcfs != None and i >= max_gcfs: continue
+			col_array = []
+			col_array.append('RE')
+			col_array.append(str(i))
+			col_array.append(str(i+1))
+			if sample in gs_annots[gcf]:
+				col_array.append(annotation_colors[gs_annots[gcf][sample]])
+				gseef_track_handle.write('\t'.join([gcf, str(i), sample, gs_annots[gcf][sample], '"' + annotation_colors[gs_annots[gcf][sample]] + '"']) + '\n')
+			else:
+				gseef_track_handle.write('\t'.join([gcf, str(i), sample, 'absent', '"#FFFFFF"']) + '\n')
+				col_array.append('#FFFFFF')
+			col_array.append(gcf)
+			printlist.append('|'.join(col_array))
+		itol_track_handle.write('\t'.join(printlist) + '\n')
+	itol_track_handle.close()
+	gseef_track_handle.close()
+
+	# Step 4: Create and run GSeeF.R Rscript
+	logObject.info('\n---------------------\nStep 4\n---------------------\nGenerating final static PDF visualization and iTol track file.')
+	sys.stdout.write('---------------------\nStep 4\n---------------------\nGenerating final static PDF visualization and iTol track file.\n')
+
+	resulting_png = final_results_dir + 'Phylogenetic_Heatmap.png'
+	label_resulting_png = final_results_dir + 'Annotation_Legend.png'
+	runPlotting(outdir, rooted_species_tree_file, gseef_track_file, resulting_png, label_resulting_png, logObject)
+
+	# Close logging object and exit
+	logObject.info('GSeeF completed! Check out the major results in the folder: %s' % final_results_dir)
+	sys.stdout.write('GSeeF completed! Check out the major results in the folder:\n%s\n' % final_results_dir)
+	util.closeLoggerObject(logObject)
+	sys.exit(0)
+
+def parseGECCOGBKForFunction(bgc_gbk, logObject):
+	try:
+		rec = SeqIO.read(bgc_gbk, 'genbank')
+		product = 'unknown'
+		try:
+			product = rec.annotations['structured_comment']['GECCO-Data']['biosyn_class']
+		except:
+			try:
+				product = rec.annotations['structured_comment']['GECCO-Data']['cluster_type']
+			except:
+				pass
+		if product == 'Unknown':
+			product = 'unknown'
+		return(product)
+	except:
+		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
+		raise RuntimeError()
+
+def parseAntiSMASHGBKForFunction(bgc_gbk, logObject):
+	product = 'unknown'
+	try:
+		products = set([])
+		with open(bgc_gbk) as obg:
+			for rec in SeqIO.parse(obg, 'genbank'):
+				for feat in rec.features:
+					if feat.type == 'protocluster':
+						try:
+							products.add(feat.qualifiers.get('product')[0])
+						except:
+							pass
+		if len(products) == 1:
+			product = list(products)[0]
+		elif len(products) == 2 and 'NRPS-like' in products and 'NRPS' in products:
+				product = 'NRPS'
+		elif len(products) >= 2:
+			product = 'multi-type'
+	except:
+		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
+		raise RuntimeError()
+	return(product)
+
+def runPlotting(workspace, phylo_file, heatmap_file, png_file, legend_png_file, logObject):
+	try:
+		gseef_script = workspace + 'gseef_rscript.R'
+		gs_handle = open(gseef_script, 'w')
+
+		gs_handle.write('library(ggplot2)\n')
+		gs_handle.write('library(ggtree)\n')
+		gs_handle.write('library(gggenes)\n')
+		gs_handle.write('library(ape)\n')
+		gs_handle.write('library(phytools)\n')
+		gs_handle.write('library(aplot)\n')
+		gs_handle.write('library(dplyr)\n')
+		gs_handle.write('library(grid)\n')
+		gs_handle.write('library(gridExtra)\n\n')
+
+		gs_handle.write('phylo.tree <- read.tree("' + phylo_file + '")\n')
+		gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
+
+		gs_handle.write('heatmap.data <- read.table("' + heatmap_file + '", header=T, sep="\\t")\n')
+		gs_handle.write('heatmap.data.filt <- heatmap.data[heatmap.data$annotation != "absent",]\n')
+		gs_handle.write('heatmap.data.select <- distinct(heatmap.data.filt[c("annotation", "colors")])\n')
+		gs_handle.write('gcf_colors <- c(heatmap.data.select$colors)\n')
+		gs_handle.write('names(gcf_colors) <- c(heatmap.data.select$annotation)\n\n')
+
+		gs_handle.write('png("' + png_file + '", height=10, width=20, units="in", res=300)\n')
+		gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')
+		gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = reorder(gcf, gcf_index), y = label, fill = annotation)) +\n') 
+		gs_handle.write('theme_classic() + scale_fill_manual(values=gcf_colors, na.value="white") +\n')
+		gs_handle.write('xlab("GCF IDs") + ylab("") + geom_tile(color="white", show.legend=F) +\n')
+		gs_handle.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
+		gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
+		gs_handle.write('dev.off()\n\n')
+
+		gs_handle.write('png("' + legend_png_file + '", height=10, width=5, units="in", res=300)\n')
+		gs_handle.write('my_hist <- ggplot(heatmap.data, aes(x=annotation, y=1, fill = annotation)) + geom_bar(stat="identity") + scale_fill_manual(values=gcf_colors)\n')
+		gs_handle.write('legend <- cowplot::get_legend(my_hist)\n')
+		gs_handle.write('grid.newpage()\n')
+		gs_handle.write('grid.draw(legend)\n')
+		gs_handle.write('dev.off()\n\n')
+
+		gs_handle.close()
+		
+		rscript_cmd = ['Rscript', gseef_script]
+		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[png_file, legend_png_file])
+	except:
+		msg = 'Issues running image creation (which is primarily based on the R library ggtree)'
+		sys.stderr.write(msg + '\n')
+		logObject.error(msg)
+		sys.exit(1)
+
+if __name__ == '__main__':
+	GSeeF()

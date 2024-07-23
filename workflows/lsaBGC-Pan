@@ -43,16 +43,14 @@ import traceback
 import multiprocessing
 import math
 import itertools
+from Bio import SeqIO
 from operator import itemgetter
 from collections import defaultdict
-import gzip
-import resource
 from time import sleep
 from lsaBGC import util
 from ete3 import Tree
-
-os.environ['OMP_NUM_THREADS'] = '4'
-lsaBGC_main_directory = '/'.join(os.path.realpath(__file__).split('/')[:-2]) + '/'
+import warnings
+warnings.filterwarnings('ignore')
 
 def create_parser():
 	""" Parse arguments """
@@ -60,7 +58,7 @@ def create_parser():
 	   __              ___   _____  _____
 	  / /  ___ ___ _  / _ ) / ___/ / ___/
 	 / /  (_-</ _ `/ / _  |/ (_ / / /__  
-	/_/  /___/\_,_/ /____/ \___/  \___/  
+	/_/  /___/\\_,_/ /____/ \\___/  \\___/  
 	*******************************************************************************************************************
 	Program: lsaBGC-Pan
 	Author: Rauf Salamzade
@@ -75,7 +73,7 @@ def create_parser():
 	* Check out the considerations wiki page: https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/00.-Background-&-Considerations  	
 	* Either provide an antiSMASH results directory or a directory with genomes (not both!).
 	* lsaBGC-Pan does not have expansion functionalities to make things simpler and more straightforward - thus to make 
-	  sure your analysis runs in a relatively timely manner, the program is restricted to handling data from 10-200 genomes.
+	  sure your analysis runs in a relatively timely manner, the program is restricted to handling data from 4-200 genomes.
 		- Consider using tools for dereplication/strain-clustering (such as skDER, dRep, PopPunk, or treemmer) to prune
 		  down your set of genomes.
 	* Panaroo should only be used if working with genomes belonging to a single bacterial species. If working with 
@@ -93,56 +91,61 @@ def create_parser():
 				   then it will also be run and overlapping GECCO and antiSMASH BGC regions will be consolidated by taking
 				   the larger region. 
 		- Step 2: Run OrthoFinder/Panaroo for orthology inference.
-		- Step 3: Run lsaBGC-Cluster.py.
+		- Step 3: Create species tree/phyogeny from (near-) core ortholog groups.
+		- Step 4: Infer populations (will do so at multiple "core AAI" cutoffs) [no checkpoint, always rerun].
+		- Step 5: Run lsaBGC-Cluster.py to determine evolutionary GCFs (eGCFs) (by default in testing mode unless 
+				  --auto-cluster specified) [no checkpoint, always rerun].
 		
-		ASSESS GCF QUALITY 
+		BREAK (optional - but recommended - can be skipped by issuing --no-break)
 		---------------------------		
-		- Step 4a: MANUAL (can be automated - but not recommended): examine which parameters make the most sense for e
-				   evolutionary clustering of eGCFs. Restart the workflow after with parameters for clustering adapted.
-		- Step 4b: AUTOMATIC bigscape mode based detection of GCFs using default cutoffs Navarro-Munoz, Selem-Mojica, and 
-				   Mullowney et al. 2020 found as best partitioning gene cluster families to match metabolomics data.
-								  
+		- Step 6a: Manually examine which parameters make the most sense for evolutionary clustering of eGCFs. Restart 
+				   the workflow after with parameters for gene cluster clustering adapted.
+		- Step 6b: Manually assess how population designations structure along the species tree with different core AAI
+				   cutoffs and, if desired, adjust population designations.							  
+
 		PART 2
 		------
-		- Step 5: Run GToTree and (optionally) group samples into populations/clades
-		- Step 6: Parallel running of zol (twice with and without -ace option) per (e)GCF.
-		- Step 7: Parallel running of lsaBGC-MIBiGMapper.
+		- Step 7: Parallel running of zol (twice with and without the -ace option) per (e)GCF.
 		- Step 8: Parallel running of GSeeF, lsaBGC-See, and lsaBGC-ComprehenSeeIve per (e)GCF.
-		- Step 9: Parallel running of lsaBGC-Sociate (for both ortholog groups and (e)GCFs).
-		- Step 10: Parallel running of salt (part of zol) per (e)GCF.
-		- Step 11: Create consolidated report of zol, salt, lsaBGC-MIBiGMapper, and lsaBGC-Sociate results.
+		- Step 9: Parallel running of lsaBGC-MIBiGMapper
+		- Step 10 Parallel running of lsaBGC-Reconcile and lsaBGC-Sociate.
+		- Step 11: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate results.
 	*******************************************************************************************************************
-	GToTree taxa models available (more resolute taxonomic groups will have more genes to use for building phylogeny):
-	(1) Actinobacteria, (2) Alphaproteobacteria, (3) Archaea, (4) Bacteria, (5) Bacteria_and_Archaea, 
- 	(6) Betaproteobacteria, (7) Chlamydiae, (8) Cyanobacteria, (9) Epsilonproteobacteria, (10) Firmicutes, 
- 	(11) Firmicutes, (12) Gammaproteobacteria, (13) Proteobacteria, (14) Tenericutes, (15) Universal_Hug_et_al
- 	*******************************************************************************************************************
 	""", formatter_class=argparse.RawTextHelpFormatter)
 
-	parser.add_argument('-a', '--antismash-results-directory', 'A directory where subdirectories under the main directory should coincide with antiSMASH results per sample/genome.', required=False, default=False)
-	parser.add_argument('-g', '--genomes-directory', help='A directory with additional genomes, e.g. those recently sequenced by the\nuser, belonging to the taxa. Accepted formats include FASTA.\nAccepted suffices include: .fna, .fa, .fasta.', required=False, default=None)
-	parser.add_argument('-o', '--output-directory', help='Parent output/workspace directory.', required=True)
+	parser.add_argument('-a', '--antismash-results-directory', help="A directory where subdirectories under the main directory should coincide with antiSMASH results per sample/genome [Optional].", required=False, default=None)
+	parser.add_argument('-g', '--genomes-directory', help="A directory with additional genomes, e.g. those recently sequenced by the\nuser, belonging to the taxa. Accepted formats include FASTA.\nAccepted suffices include: .fna, .fa, .fasta. Will run GECCO for BGC-predictions [Optional].", required=False, default=None)
+	parser.add_argument('-o', '--output-directory', help="Parent output/workspace directory.", required=True)
 
 	parser.add_argument('-f', '--fungal', action='store_true', help="Specify if genomes are fungal.", required=False, default=False)
-	parser.add_argument('-ub', '--use-bigscape', action='store_true', help="Use BiG-SCAPE to infer GCFs and skip genome-wide orthology inference (also skips lsaBGC-Sociate).", required=False, default=False)
+	parser.add_argument('-k', '--keep_locus_tags', action='store_true', help="Keep original locus tags in antiSMASH GenBank files.", required=False, default=False)
 	parser.add_argument('-rg', '--run-gecco', action='store_true', help="If antiSMASH results are provided also run GECCO for annotation of BGCs.", required=False, default=False)
 
-	parser.add_argument('-om', '--ortholog-method', help='Software for inference of ortholog groups. (Options: OrthoFinder, Panaroo).\n[Default is OrthoFinder].', default='OrthoFinder', required=False)
-	parser.add_argument('-mc', '--run-coarse-orthofinder', action='store_true', help='Use coarse clustering of homolog groups in OrthoFinder instead of more\nresolute hierarchical determined homolog groups. There are some advantages to coarse\nOGs, including their construction being deterministic.', required=False, default=False)
+	parser.add_argument('-up', '--use-panaroo', action='store_true', help='Use Panaroo instead of OrthoFinder for orthology inference. Recommended if investigating a single bacterial species.', default=False, required=False)
+	parser.add_argument('-omc', '--run-coarse-orthofinder', action='store_true', help='Use coarse clustering of homolog groups in OrthoFinder instead of more\nresolute hierarchical determined homolog groups. There are some advantages to coarse\nOGs, including their construction being deterministic.', required=False, default=False)
+	parser.add_argument('-ohq', '--run-msa-orthofinder', action='store_true', help='Run OrthoFinder using multiple sequence alignments instead of DendroBlast to determine hierarchical ortholog groups.', required=False, default=False)
 
-	parser.add_argument('-ac', '--auto_cluster', action='store_true', help='Run lsaBGC-Cluster with default cutoffs to determine eGCFs - not encouraged and turned off by default.', required=False, default=False)
+	parser.add_argument('-hqp', '--high-quality-phylogeny', action='store_true', help='Prioritize quality over speed for phylogeny construction.', required=False, default=False)
+	parser.add_argument('-cs', '--core-proportion', type=float, help='What proportion of genomes single-copy orthogroups need to be found in to be used for species tree construction.', required=False, default=0.90)
+
+	parser.add_argument('-pic', '--population-identity-cutoff', type=float, help='The core-genome identity cutoff used to define pairs of genomes as belonging to the same group/population [Default is 99.0].', required=False, default=99.0)
+
 	parser.add_argument('-ci', '--cluster-inflation', type=float, help='The MCL inflation parameter for clustering BGCs into eGCFs [Default is 0.8].', required=False, default=0.8)
-	parser.add_argument('-cc', '--cluster-coverage', type=float, help='The minimal coverage proportioon threshold for considering them as a pair prior to MCL [Default is 0.25].', required=False, default=0.25)
+	parser.add_argument('-cj', '--cluster-jaccard', type=float, help="Cutoff for Jaccard similarity of homolog groups shared between two BGCs [Default is 50.0].", required=False, default=50.0)
 	parser.add_argument('-cr', '--cluster-syntenic-correlation', type=float, help='The minimal correlation coefficient needed between for considering them as a pair prior to MCL [Default is 0.4].', required=False, default=0.4)
 
-	parser.add_argument('-gtm', '--gtotree-model', help="SCG model for secondary GToTree analysis and what would be used for dereplication.\n[Default is \"Universal_Hug_et_al\"].", default='Universal_Hug_et_al', required=False)
-	parser.add_argument('-p', '--population-listing_file', help="File mapping sample names to populations/lineage designations.", required=False, default=None)
-	parser.add_argument('-pt', '--population-threshold', type=float, help="Amino acid similarity threshold of SCGs for considering\ntwo genomes as belonging to the same population [Default is 0.99].", default=0.99, required=False)
+	parser.add_argument('-nb', '--no-break', action='store_true', help='No break after step 5 to assess eGCF clustering and population stratification.', required=False, default=False)
 
-	parser.add_argument('-zp', '--zol_parameters', help="The parameters to run zol analyses with - please surround by quotes [Defaut is \"-d -ri\"].", default='-d -ri')
+	parser.add_argument('-zp', '--zol-parameters', help="The parameters to run zol analyses with - please surround by quotes [Defaut is \"\"].", default="")
+	parser.add_argument('-zhq', '--zol-high-quality-preset', action='store_true', help='Use preset of options for performing high-quality and comprehensive zol analyses instead of prioritizing speed.')
+	parser.add_argument('-zl', '--zol-keep-multi-copy', action='store_true', help='Include all GCF instances in zol analysis, not just the most representative instance from each sample/genome.', required=False, default=False)
+	parser.add_argument('-ed', '--zol-edge-distance', type=int, help="Distance in bp to scaffold/contig edge to be considered potentially fragmented [Default is 5000].", required=False, default=5000)
+	# considering adding future argument for focal population definition in zol based on ID determined by popstrat
 
-	parser.add_argument('-py', '--use-pyrodigal', action='store_true', help='Use pyrodigal instead of prodigal (only if genomes are provided - not relevant if antiSMASH results provided).', required=False, default=False)
-	parser.add_argument('-c', '--cpus', type=int, help="Total number of CPUs to use. Recommend inreasing as much as possible. [Default is 4].", required=False, default=4)
+	parser.add_argument('-hqr', '--high-quality-reconcile', action='store_true', help="Perform high-quality alignment for reconcile analysis.", required=False, default=False)
+
+	parser.add_argument('-py', '--use-prodigal', action='store_true', help='Use prodigal instead of pyrodigal (only if genomes are provided - not relevant if antiSMASH results provided).', required=False, default=False)
+	parser.add_argument('-c', '--threads', type=int, help="Total number of threads/processes to use. Recommend inreasing as much as possible. [Default is 4].", required=False, default=4)
 	parser.add_argument('-d', '--docker-mode', action='store_true', help=argparse.SUPPRESS, required=False, default=False)
 	
 	args = parser.parse_args()
@@ -152,27 +155,38 @@ def lsaBGC():
 	myargs = create_parser()
 
 	### PARSE OPTIONS
-	antismash_directory = myargs.antismash_directory
+	antismash_directory = myargs.antismash_results_directory
 	genomes_directory = myargs.genomes_directory
 	outdir = os.path.abspath(myargs.output_directory) + '/'
 
-	run_gecco_flag = myargs.run_gecco
-	bigscape_mode_flag = myargs.use_bigscape
-
-	gtotree_model = myargs.gtotree_model
-	population_threshold = myargs.population_threshold
-	population_listing_file = myargs.population_listing_file
-
-	ortholog_method = myargs.ortholog_method.upper()
-	run_coarse_orthofinder_flag = myargs.run_coarse_orthofinder
-	
-	cpus = myargs.cpus
 	fungal_flag = myargs.fungal
-	use_pyrodigal = myargs.use_pyrodigal
+	run_gecco_flag = myargs.run_gecco
+	use_prodigal = myargs.use_prodigal
+	no_break_flag = myargs.no_break
+	keep_lt_flag = myargs.keep_locus_tags
+
+	use_panaroo_flag = myargs.use_panaroo
+	run_coarse_orthofinder_flag = myargs.run_coarse_orthofinder
+	run_msa_orthofinder_flag = myargs.run_msa_orthofinder
+	
+	cluster_inflation_param = myargs.cluster_inflation 
+	cluster_jaccard_param = myargs.cluster_jaccard
+	cluster_syntenic_correlation = myargs.cluster_syntenic_correlation
+
+	high_quality_phylogeny_flag = myargs.high_quality_phylogeny
+	phylogeny_core_proportion = myargs.core_proportion
+	population_identify_cutoff = myargs.population_identity_cutoff
+
+	zol_parameters = myargs.zol_parameters
+	zol_high_quality_preset = myargs.zol_high_quality_preset
+	zol_edge_distance = myargs.zol_edge_distance
+	zol_keep_multi_copy = myargs.zol_keep_multi_copy
+	
+	threads = myargs.threads
 	docker_mode_flag = myargs.docker_mode
 
 	if (antismash_directory != None and os.path.isdir(antismash_directory)) and (genomes_directory != None and os.path.isdir(genomes_directory)):
-		msg = 'Both directories of antiSMASH results and genomes provided.'
+		msg = 'Both directories of antiSMASH results and genomes provided. This is not alllowed currently.'
 		sys.stderr.write(msg + '\n')
 		sys.exit(1)
 	elif (antismash_directory != None and os.path.isdir(antismash_directory)):
@@ -183,40 +197,18 @@ def lsaBGC():
 		genomes_directory = os.path.abspath(genomes_directory) + '/'
 		msg = 'Genomes directory provided: %s' % genomes_directory
 		sys.stderr.write(msg + '\n')
-	
-	if population_listing_file != None and os.path.isfile(population_listing_file):
-		population_listing_file = os.path.isfile(population_listing_file)
-		msg = 'Population listing file provide: %s' % population_listing_file
-		sys.stderr.write(msg + '\n')
-
-	if fungal_flag:
-		ortholog_method = 'ORTHOFINDER'
-		try:
-			assert(antismash_directory != None and os.path.isdir(antismash_directory))
-		except:
-			msg = 'fungal mode triggered but no antiSMASH results were provided. GECCO is not designed for fungi, so exiting ...'
-			sys.stderr.write(msg + '\n')
-			sys.exit(1)
-
-	try:
-		assert (ortholog_method in set(['ORTHOFINDER', 'PANAROO']))
-	except:
-		sys.stderr.write('Ortholog inference software specified is not a valid option.\n')
-		sys.exit(1)
 
 	if genomes_directory != None:
 		try:
-			user_genomes_directory = os.path.abspath(user_genomes_directory) + '/'
-			assert (os.path.isdir(user_genomes_directory))
+			genomes_directory = os.path.abspath(genomes_directory) + '/'
+			assert (os.path.isdir(genomes_directory))
 		except:
 			sys.stderr.write('User defined genomes directory could not be validated to exist!\n')
 			sys.exit(1)
 
-	checkModelIsValid(gtotree_model, docker_mode_flag)
-
 	if os.path.isdir(outdir):
 		sys.stderr.write(
-			"Output directory already exists! Overwriting in 5 seconds, but only where needed will use checkpoint files to skip certain steps...\n")
+			"Output directory already exists! Overwriting in 5 seconds, but only where needed, will use checkpoint files to skip certain steps...\n")
 		sleep(5)
 	else:
 		util.setupReadyDirectory([outdir])
@@ -229,7 +221,7 @@ def lsaBGC():
    __              ___   _____  _____
   / /  ___ ___ _  / _ ) / ___/ / ___/
  / /  (_-</ _ `/ / _  |/ (_ / / /__  
-/_/  /___/\_,_/ /____/ \___/  \___/  
+/_/  /___/\\_,_/ /____/ \\___/  \\___/  
 *************************************"""
 	version_string = util.parseVersionFromSetupPy()
 	sys.stdout.write(logo + '\n\n')
@@ -244,7 +236,31 @@ def lsaBGC():
 	parameters_handle.write(' '.join(sys.argv) + '\n')
 	parameters_handle.close()
 
-	parallel_jobs_4cpu = max(math.floor(cpus / 4), 1)
+	if fungal_flag:
+		use_panaroo_flag = False
+		try:
+			assert(antismash_directory != None and os.path.isdir(antismash_directory))
+		except:
+			msg = 'fungal mode triggered but no antiSMASH results were provided. GECCO is not designed for fungi, so exiting ...'
+			sys.stderr.write(msg + '\n')
+			sys.exit(1)
+	else:
+		gw_pkl = outdir + 'GECCO_PF_Weights.pkl'
+		axel_cmd = ['axel', 'https://github.com/Kalan-Lab/lsaBGC/raw/main/db/GECCO_PF_Weights.pkl', '-o', gw_pkl]
+		try:
+			util.runCmdViaSubprocess(axel_cmd, logObject=logObject, check_files=[gw_pkl])
+		except:
+			msg = 'Had issues downloading GECCO domain weights file!'
+			sys.stderr.write(msg + '\n')
+			sys.stderr.write(traceback.format_exc())
+			sys.exit(1)
+		os.environ["GECCO_DOMAIN_WEIGHTS_PKL_FILE"] = gw_pkl
+
+	parallel_jobs_4thread = max(math.floor(threads / 4), 1)
+	multi_thread = 4
+	if threads < 4:
+		multi_thread = threads
+		parallel_jobs_4thread = 1
 
 	if docker_mode_flag:
 		msg = 'Running in Docker mode'
@@ -258,8 +274,13 @@ def lsaBGC():
 	scratch_dir = outdir + 'Scratch_Workspace/'
 	if not os.path.isdir(scratch_dir):
 		os.mkdir(scratch_dir)
+
+	final_dir = outdir + 'Final_Results/'
+	if not os.path.isdir(final_dir):
+		os.mkdir(final_dir)
+
 	# Step 1: process input genomes / antiSMASH results
-	msg = '--------------------\nStep 1\n--------------------\nBeginning by assessing input files\n'
+	msg = '--------------------\nStep 1: Beginning by assessing input files\n--------------------'
 	sys.stderr.write(msg + '\n')
 	logObject.info(msg)
 
@@ -267,26 +288,28 @@ def lsaBGC():
 	all_genome_genbank_listing_file = outdir + 'Listing_of_Annotated_Genomes_in_GenBank_Format.txt'
 	detailed_BGC_listing_file = outdir + 'Detailed_BGC_Listing.txt'
 	simple_BGC_listing_file = outdir + 'Simple_BGC_Listing.txt'
+	genome_wide_listing_file = outdir  + 'Sample_GenBank_Files.txt'
 	step_1_checkpoint_file = check_dir + 'Step_1.txt'
 	if not os.path.isfile(step_1_checkpoint_file):
 		dblf_handle = open(detailed_BGC_listing_file, 'w')
-		dblf_handle.write('\t'.join(['sample', 'method', 'genome_path', 'bgc_id', 'bgc_path', 'scaffold', 'start', 'end']) + '\n')
+		dblf_handle.write('\t'.join(['sample', 'method', 'genome_path', 'bgc_id', 'bgc_path', 'scaffold', 'start', 'end', 'dist_to_edge']) + '\n')
 		sblf_handle = open(simple_BGC_listing_file, 'w')
+		gwlf_handle = open(genome_wide_listing_file, 'w')
 		if antismash_directory != None:
 			msg_about_antismash_input = """ 
-			You have provided a directory with antiSMASH - what is expected is 
-			subdirectories within this directory which each correspond to an 
-			individual sample's genome. Within each directory corresponding to 
-			a single genome, multiple GenBank files are expected. Specifically,
-			at least one GenBank file with '.region' substring in its name 
-			(corresponding to a BGC region) and one GenBank without the 
-			substring (corresponding to the full genome) are expected. If 
-			these expectations are not met, the subdirectory will be ignored. 
-			Note, the name of the subdirectory will be regarded as the sample
-			name. GenBank files must also end with the suffix '.gbk'. In
-			addition, lsaBGC uses locus tags - if these are not available 
-			in the GenBank files - lsaBGC will create copies of them with 
-
+You have provided a directory with antiSMASH - what is expected is 
+subdirectories within this directory which each correspond to an 
+individual sample's genome. Within each directory corresponding to 
+a single genome, multiple GenBank files are expected. Specifically,
+at least one GenBank file with '.region' substring in its name 
+(corresponding to a BGC region) and one GenBank without the 
+substring (corresponding to the full genome) are expected. If 
+these expectations are not met, the subdirectory will be ignored. 
+Note, the name of the subdirectory will be regarded as the sample
+name. GenBank files must also end with the suffix '.gbk'. In
+addition, lsaBGC uses locus tags - which are automatically renamed 
+to ensure seamless computing - if retention of original locus tags
+is preferred, users can issue the --keep_locus_tags option.
 			"""
 			print(msg_about_antismash_input)
 
@@ -315,10 +338,10 @@ def lsaBGC():
 					sys.stderr.write(msg + '\n')
 					logObject.warning(msg)
 
-			if sample_count < 10 or sample_count > 200:
-				msg = 'lsaBGC-Pan is designed for investigation of 10 to 200 genomes per analysis. Only found %d genomes.' % sample_count
+			if sample_count < 4 or sample_count > 200:
+				msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Only found %d genomes.' % sample_count
 				if sample_count > 200:
-					msg = 'lsaBGC-Pan is designed for investigation of 10 to 200 genomes per analysis. Found %d genomes.' % sample_count
+					msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Found %d genomes.' % sample_count
 				sys.stderr.write(msg + '\n')
 				logObject.error(msg)
 				sys.exit(1)
@@ -340,8 +363,8 @@ def lsaBGC():
 						lt_check_inputs.append([sample, 'bgc_region', bgc_gbk, outf, logObject])
 
 				try:
-					p = multiprocessing.Pool(cpus)
-					p.map(util.checkCDSHaveLocusTags, scaff_inf_inputs)
+					p = multiprocessing.Pool(threads)
+					p.map(util.checkCDSHaveLocusTags, lt_check_inputs)
 					p.close()
 				except Exception as e:
 					msg = 'Issues with assessing the validity and presence of locus tags in GenBank files.'
@@ -356,14 +379,15 @@ def lsaBGC():
 					with open(cds_lt_check_dir + f) as ocf:
 						for line in ocf:
 							line = line.strip()
-							sample, gbk_type, gbk, cds, lt_found = line.split('\t')
-							if cds == 0:
+							gbk_type, sample, gbk, cds_count, all_lt_found = line.split('\t')
+							cds_count = int(cds_count)
+							if cds_count == 0:
 								if gbk_type == 'genome':
 									del sample_genomes[sample]
 									del sample_bgc_regions[sample]							
 								else:
 									sample_bgc_regions[sample].remove(gbk)
-							elif not lt_found:
+							elif not all_lt_found or not keep_lt_flag:
 								samples_without_lts.add(sample)
 
 				alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -376,11 +400,11 @@ def lsaBGC():
 						del sample_bgc_regions[sample]
 						continue
 					lt = possible_locustags[i]
-					recreate_gbks_inputs.append([sample, lt, genbank_recreate_dir, sample_genomes[sample], sample_bgc_regions[sample], logObject])
+					recreate_gbks_inputs.append([sample, lt, genbank_recreate_dir, sample_genomes[sample]] + sample_bgc_regions[sample] + [keep_lt_flag, logObject])
 					
 				try:
-					p = multiprocessing.Pool(cpus)
-					p.map(util.addLocusTagsToGBKs, scaff_inf_inputs)
+					p = multiprocessing.Pool(threads)
+					p.map(util.addLocusTagsToGBKs, recreate_gbks_inputs)
 					p.close()
 				except Exception as e:
 					msg = 'Issues with recreating select GenBank files to make sure each CDS feature has locus tags.'
@@ -390,8 +414,13 @@ def lsaBGC():
 					logObject.error(traceback.format_exc())
 					sys.exit(1)
 
+				if not keep_lt_flag:
+					sample_genomes = {}
+					sample_bgc_regions = defaultdict(list)
+
+				sample_count = 0 
 				for sample in os.listdir(genbank_recreate_dir):
-					subdir = antismash_directory + sample + '/'
+					subdir = genbank_recreate_dir + sample + '/'
 					if not os.path.isdir(subdir): continue
 					genome_gbks = []
 					region_gbks = []
@@ -412,16 +441,24 @@ def lsaBGC():
 						sys.stderr.write(msg + '\n')
 						logObject.warning(msg)
 
+				if sample_count < 4 or sample_count > 200:
+					msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Only found %d genomes.' % sample_count
+					if sample_count > 200:
+						msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Found %d genomes.' % sample_count
+					sys.stderr.write(msg + '\n')
+					logObject.error(msg)
+					sys.exit(1)
+
 				scaff_inf_inputs = []
 				antismash_location_data = []
 				for sample in sample_genomes:
 					genome_gbk = sample_genomes[sample]
 					for bgc_gbk in sample_bgc_regions[sample]:
 						outf = scaff_inf_dir + sample + '_antismash_bgc_region_' + bgc_gbk.split('/')[-1]
-						scaff_inf_inputs.append([bgc_gbk, genome_gbk, outf])
+						scaff_inf_inputs.append([genome_gbk, bgc_gbk, outf])
 						antismash_location_data.append([sample, genome_gbk, bgc_gbk, outf])
 				try:
-					p = multiprocessing.Pool(cpus)
+					p = multiprocessing.Pool(threads)
 					p.map(util.findAntiSMASHBGCInFullGenbank, scaff_inf_inputs)
 					p.close()
 				except Exception as e:
@@ -437,16 +474,16 @@ def lsaBGC():
 
 				if run_gecco_flag:
 					gecco_results_dir = outdir + 'GECCO_Results/'
-					util.setupReadyDirectory(gecco_results_dir)
+					util.setupReadyDirectory([gecco_results_dir])
 					gecco_cmds = []
 					for sample in sample_genomes:
 						genome_gbk = sample_genomes[sample]
-						gecco_cmd = ['gecco', 'run', '-j', '4', '-o', gecco_results_dir + sample + '/', 
-				                     '-g', genome_gbk, '--cds-feature', 'CDS']
+						gecco_cmd = ['gecco', 'run', '-j', str(multi_thread), '-o', gecco_results_dir + sample + '/', 
+				                     '-g', genome_gbk, '--cds-feature', 'CDS', logObject]
 						gecco_cmds.append(gecco_cmd)
 
 					try:
-						p = multiprocessing.Pool(parallel_jobs_4cpu)
+						p = multiprocessing.Pool(parallel_jobs_4thread)
 						p.map(util.multiProcess, gecco_cmds)
 						p.close()
 					except:
@@ -458,6 +495,12 @@ def lsaBGC():
 						sys.exit(1)	
 
 					for sample in os.listdir(gecco_results_dir):
+						genome_gbk = sample_genomes[sample]
+						scaff_lengths = {}
+						with open(genome_gbk) as ogg:
+							for rec in SeqIO.parse(ogg, 'genbank'):
+								scaff_lengths[rec.id] = len(str(rec.seq))
+
 						gecco_sample_results_dir = gecco_results_dir + sample + '/'
 						for f in os.listdir(gecco_sample_results_dir):
 							if not f.endswith('.clusters.tsv'): continue
@@ -466,17 +509,25 @@ def lsaBGC():
 									if i == 0: continue
 									line = line.strip()
 									scaff, bgc_id, start_coord, end_coord = line.split('\t')[:4]
+									start_coord = int(start_coord)
+									end_coord = int(end_coord)
 									bgc_file = gecco_sample_results_dir + bgc_id + '.gbk'
 									start_coord, end_coord = sorted([start_coord, end_coord])
 									bgc_length = end_coord-start_coord+1
-									gecco_bgc_locations.append([bgc_file, sample, scaff, start_coord, end_coord, bgc_length, 'gecco'])
+									dist_to_edge = min([int(start_coord), scaff_lengths[scaff]-int(end_coord)])
+									gecco_bgc_locations.append([bgc_file, sample, scaff, start_coord, end_coord, bgc_length, dist_to_edge, 'gecco'])
 						
+				for sample in sample_genomes:
+					gwlf_handle.write(sample + '\t' + sample_genomes[sample] + '\n')
+
 				# conslidate results (picking larger regions if two overlap) and write to listing files
 				all_bgc_locations = antismash_bgc_locations + gecco_bgc_locations
-				
+
 				accounted_positions = defaultdict(lambda: defaultdict(set))
 				for bgc_info in sorted(all_bgc_locations, key=itemgetter(5), reverse=True):
-					bgc_file, sample, scaff, start_coord, end_coord, bgc_length, prediction_software = bgc_info
+					bgc_file, sample, scaff, start_coord, end_coord, bgc_length, dist_to_edge, prediction_software = bgc_info
+					start_coord = int(start_coord)
+					end_coord = int(end_coord)
 					ap = 0
 					for pos in range(start_coord, end_coord+1):
 						if pos in accounted_positions[sample][scaff]:
@@ -484,21 +535,24 @@ def lsaBGC():
 						accounted_positions[sample][scaff].add(ap)
 					ap_prop = ap/float(bgc_length)
 					if ap_prop >= 0.1:
-						msg = 'Over 10\% of BGC %s (predicted via %s) overlaps in genome space with other longer BGCs and is thus dropped.' % (bgc_file, prediction_software)
+						msg = 'Over 10%% of BGC %s (predicted via %s) overlaps in genome space with other longer BGCs and is thus dropped.' % (bgc_file, prediction_software)
 						sys.stderr.write(msg + '\n')
 						logObject.warning(msg)
 						continue
 					bgc_id = '.gbk'.join(bgc_file.split('/')[-1].split('.gbk')[:-1])
-					dblf_handle.write('\t'.join([str(x) for x in [sample, prediction_software, sample_genomes[sample], bgc_id, bgc_file, scaff, start_coord, end_coord]]) + '\n')
-					sblf_handle.write('\t'.join([sample, bgc_file, prediction_software]))
+					dblf_handle.write('\t'.join([str(x) for x in [sample, prediction_software, sample_genomes[sample], bgc_id, bgc_file, scaff, start_coord, end_coord, dist_to_edge]]) + '\n')
+					sblf_handle.write('\t'.join([sample, bgc_file, prediction_software]) + '\n')
 		else:
 			gene_call_dir = outdir + 'Gene_Calling/'
 
 			util.setupReadyDirectory(([gene_call_dir]))
 			run_prodigal_cmds = []
-		
+
+			alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+			possible_locustags = sorted(list(set([''.join(list(x)) for x in list(itertools.product(alphabet, repeat=3))])))
+
 			sample_genomes = {}
-			for file in os.listdir(genomes_directory):
+			for i, file in enumerate(os.listdir(genomes_directory)):
 				sample = util.cleanUpSampleName('.'.join(file.split('.')[:-1]))
 				genome_file = genomes_directory + file
 				try:
@@ -508,23 +562,24 @@ def lsaBGC():
 					logObject.warning(msg + '\n')
 					continue
 				sample_genomes[sample] = gene_call_dir + sample + '.gbk'
-				rpc = ['runProdigalAndMakeProperGenbank.py', '-i', fna, '-s', sample, 
-		               '-o', gene_call_dir, logObject]
-				if use_pyrodigal:
-					rpc += ['-py']
+				rpc = ['runProdigalAndMakeProperGenbank.py', '-i', genome_file, '-s', sample, 
+		               '-o', gene_call_dir, '-l', possible_locustags[i], logObject]
+				if use_prodigal:
+					rpc += ['-gcm', 'prodigal']
 
 				run_prodigal_cmds.append(rpc)
-					
-			if len(sample_genomes) < 10 or len(sample_genomes) > 200:
-				msg = 'lsaBGC-Pan is designed for investigation of 10 to 200 genomes per analysis. Only found %d genomes.' % sample_count
+			
+			sample_count = len(sample_genomes)
+			if sample_count < 4 or sample_count > 200:
+				msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Only found %d genomes.' % sample_count
 				if sample_count > 200:
-					msg = 'lsaBGC-Pan is designed for investigation of 10 to 200 genomes per analysis. Found %d genomes.' % sample_count
+					msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Found %d genomes.' % sample_count
 				sys.stderr.write(msg + '\n')
 				logObject.error(msg)
 				sys.exit(1)
 
 			try:
-				p = multiprocessing.Pool(cpus)
+				p = multiprocessing.Pool(threads)
 				p.map(util.multiProcess, run_prodigal_cmds)
 				p.close()
 			except:
@@ -536,16 +591,16 @@ def lsaBGC():
 				sys.exit(1)	
 
 			gecco_results_dir = outdir + 'GECCO_Results/'
-			util.setupReadyDirectory(gecco_results_dir)
+			util.setupReadyDirectory([gecco_results_dir])
 			gecco_cmds = []
 			for sample in sample_genomes:
 				genome_gbk = sample_genomes[sample]
-				gecco_cmd = ['gecco', 'run', '-j', '4', '-o', gecco_results_dir + sample + '/', 
-		                    '-g', genome_gbk, '--cds-feature', 'CDS']
+				gecco_cmd = ['gecco', 'run', '-j', str(multi_thread), '-o', gecco_results_dir + sample + '/', 
+		                    '-g', genome_gbk, '--cds-feature', 'CDS', logObject]
 				gecco_cmds.append(gecco_cmd)
 
 			try:
-				p = multiprocessing.Pool(parallel_jobs_4cpu)
+				p = multiprocessing.Pool(parallel_jobs_4thread)
 				p.map(util.multiProcess, gecco_cmds)
 				p.close()
 			except:
@@ -558,6 +613,12 @@ def lsaBGC():
 
 			gecco_bgc_locations = []
 			for sample in os.listdir(gecco_results_dir):
+				genome_gbk = sample_genomes[sample]
+				scaff_lengths = {}
+				with open(genome_gbk) as ogg:
+					for rec in SeqIO.parse(ogg):
+						scaff_lengths[rec.id] = len(str(rec.seq))
+
 				gecco_sample_results_dir = gecco_results_dir + sample + '/'
 				for f in os.listdir(gecco_sample_results_dir):
 					if not f.endswith('.clusters.tsv'): continue
@@ -568,484 +629,350 @@ def lsaBGC():
 							scaff, bgc_id, start_coord, end_coord = line.split('\t')[:4]
 							bgc_file = gecco_sample_results_dir + bgc_id + '.gbk'
 							start_coord, end_coord = sorted([start_coord, end_coord])
-							bgc_length = end_coord-start_coord+1
-							gecco_bgc_locations.append([bgc_file, sample, scaff, start_coord, end_coord, bgc_length, 'gecco'])
+							bgc_length = int(end_coord)-int(start_coord)+1
+							dist_to_edge = min([int(start_coord), scaff_lengths[scaff]-int(end_coord)])
+							gecco_bgc_locations.append([bgc_file, sample, scaff, start_coord, end_coord, bgc_length, dist_to_edge, 'gecco'])
+
+			for sample in sample_genomes:
+				gwlf_handle.write(sample + '\t' + sample_genomes[sample] + '\n')
 
 			accounted_positions = defaultdict(lambda: defaultdict(set))
 			for bgc_info in sorted(gecco_bgc_locations, key=itemgetter(5), reverse=True):
-				bgc_file, sample, scaff, start_coord, end_coord, bgc_length, prediction_software = bgc_info
+				bgc_file, sample, scaff, start_coord, end_coord, bgc_length, dist_to_edge, prediction_software = bgc_info
 				ap = 0
-				for pos in range(start_coord, end_coord+1):
+				for pos in range(int(start_coord), int(end_coord)+1):
 					if pos in accounted_positions[sample][scaff]:
 						ap += 1
 					accounted_positions[sample][scaff].add(ap)
 				ap_prop = ap/float(bgc_length)
 				if ap_prop >= 0.1:
-					msg = 'Over 10\% of BGC %s (predicted via %s) overlaps in genome space with other longer BGCs and is thus dropped.' % (bgc_file, prediction_software)
+					msg = 'Over 10%% of BGC %s (predicted via %s) overlaps in genome space with other longer BGCs and is thus dropped.' % (bgc_file, prediction_software)
 					sys.stderr.write(msg + '\n')
 					logObject.warning(msg)
 					continue
 				bgc_id = '.gbk'.join(bgc_file.split('/')[-1].split('.gbk')[:-1])
-				dblf_handle.write('\t'.join([str(x) for x in [sample, prediction_software, sample_genomes[sample], bgc_id, bgc_file, scaff, start_coord, end_coord]]) + '\n')
-				sblf_handle.write('\t'.join([sample, bgc_file, prediction_software]))
+				dblf_handle.write('\t'.join([str(x) for x in [sample, prediction_software, sample_genomes[sample], bgc_id, bgc_file, scaff, start_coord, end_coord, dist_to_edge]]) + '\n')
+				sblf_handle.write('\t'.join([sample, bgc_file, prediction_software]) + '\n')
+
+		gwlf_handle.close()
 		sblf_handle.close()
 		dblf_handle.close()
+				
 		os.system('touch %s' % step_1_checkpoint_file)
 
-	# Step 2: Perform orthology inference using OrthoFinder or Panaroo
-	ortholog_matrix_file = outdir + 'Sample_by_OrthologGroup_Matrix.tsv'
+	# Step 2: Perform orthology inference
+	msg = '--------------------\nStep 2: Performing orthology inference\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+	
+	ortholog_matrix_file = outdir + 'Sample_by_Orthogroups_Matrix.tsv'
 	step_2_checkpoint_file = check_dir + 'Step_2.txt'
 	if not os.path.isfile(step_2_checkpoint_file):
-
-		if not bigscape_mode_flag:
-			proteomes_dir = scratch_dir + 'proteomes/'
+		if not use_panaroo_flag:
+			proteomes_dir = scratch_dir + 'orthofinder_inputs/'
+			orthofinder_results_dir = outdir + 'OrthoFinder_Results/'
 			util.setupReadyDirectory([proteomes_dir])
 			
 			sample_genomes = {}
-			with open(simple_BGC_listing_file) as oslf:
-				for line in oslf:
+			with open(detailed_BGC_listing_file) as odlf:
+				for i, line in enumerate(odlf):
+					if i == 0: continue
 					line = line.strip()
+					sample, _, genome_gbk = line.split('\t')[:3]
+					sample_genomes[sample] = genome_gbk
 
-			extract_cds_prots_cmds = []
+			extract_cds_inputs = []
 			for sample in sample_genomes:
 				genome_gbk = sample_genomes[sample]
-				proteome_faa = 
+				proteome_faa = proteomes_dir + sample + '.faa'
+				extract_cds_inputs.append([genome_gbk, proteome_faa, logObject])
 
-			msg_about_manual_param_selection = """
-			
-			"""
-			print(msg_about_antismash_input)
+			try:
+				p = multiprocessing.Pool(threads)
+				p.map(util.extractProteinsFromGenBank, extract_cds_inputs)
+				p.close()
+			except:
+				msg = 'Issues with parallel extraction of CDS proteins into FASTA files from GenBank files.'
+				sys.stderr.write(msg + '\n')
+				logObject.error(msg)
+				sys.stderr.write(traceback.format_exc())
+				logObject.error(traceback.format_exc())
+				sys.exit(1)	
 
-			sys.exit(0)
+			# check that there are not equivalent/overlapping CDS names within/across genomes
+			cds_observation_count = defaultdict(int)
+			for f in os.listdir(proteomes_dir):
+				with open(proteomes_dir + f) as opf:
+					for line in opf:
+						line = line.strip()
+						if line.startswith('>'):
+							cds = line[1:].split()[0]
+							if cds_observation_count[cds] > 0:
+								msg = 'Error: CDS %s found multiple times in one or more genomes/proteomes.' % cds
+								logObject.info(msg)
+								sys.stderr.write(msg + '\n')
+								sys.exit(1)
+							cds_observation_count[cds] += 1
+
+			og_results_matrix = None
+			if run_coarse_orthofinder_flag:
+				og_results_matrix = util.runOrthoFinder2(proteomes_dir, orthofinder_results_dir, logObject, threads=threads)
+			else:	
+				if fungal_flag:
+					og_results_matrix = util.runOrthoFinder2FullFungal(proteomes_dir, orthofinder_results_dir, run_msa_orthofinder_flag, logObject, threads=threads)
+				else:
+					og_results_matrix = util.runOrthoFinder2Full(proteomes_dir, orthofinder_results_dir, run_msa_orthofinder_flag, logObject, threads=threads)
+			os.system('mv %s %s' % (og_results_matrix, ortholog_matrix_file))
 		else:
-			bgc_dir = 
+			panaroo_input_dir = scratch_dir + 'panaroo_inputs/'
+			panaroo_results_dir = outdir + 'Panaroo_Results/'
+			util.setupReadyDirectory([panaroo_input_dir])
+
+			og_results_matrix = util.runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, panaroo_results_dir, logObject, threads=threads, panaroo_options='--clean-mode moderate --remove-invalid-genes')
+			os.system('mv %s %s' % (og_results_matrix, ortholog_matrix_file))
+		
+		try:
+			assert(os.path.isfile(ortholog_matrix_file))
+		except:
+			msg = 'Issues validating that the final ortholog by sample matrix exists: %s' % ortholog_matrix_file
+			sys.stderr.write(msg + '\n')
+			logObject.info(msg)
+			sys.exit(1)
 
 		os.system('touch %s' % step_2_checkpoint_file)
 
+	# Step 3: Create phylogeny
+	msg = '--------------------\nStep 3: Creating phylogeny from (near-)core ortholog groups\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+	step_3_checkpoint_file = check_dir + 'Step_3.txt'
+	phylogenate_results_dir = outdir + 'Create_Species_Phylogeny/'
+	if not os.path.isfile(step_3_checkpoint_file):
+		phylogenate_cmd = ['phylogenate', '-m', ortholog_matrix_file, '-i', genome_wide_listing_file, 
+					       '-p', str(phylogeny_core_proportion), '-c', str(threads), '-o', phylogenate_results_dir]
 
+		species_tree_file = phylogenate_results_dir + 'Species_Phylogeny_FastTree2.treefile'
+		if high_quality_phylogeny_flag:
+			phylogenate_cmd += ['-hq']
+			species_tree_file = phylogenate_results_dir + 'Species_Phylogeny_IQTREE_Phylogeny_mset-WAG-LG_B-1000.treefile'
 
+		util.runCmdViaSubprocess(phylogenate_cmd, logObject=logObject, check_files=[species_tree_file])
+		os.system('touch %s' % step_3_checkpoint_file)
 
-	# Step 4: Construct GToTree phylogeny - dereplication + grouping - creating listing
-	gtotree_outdir = outdir + 'GToTree_output/'
-	species_tree_file = gtotree_outdir + 'GToTree_output.tre'
-	expected_similarities_file = outdir + 'GToTree_Expected_Similarities.txt'
-	population_file = outdir + 'Genomes_to_Populations_Mapping.txt'
-	msg = '--------------------\nStep 4\n--------------------\nBeginning construction of species tree using GToTree.'
-	logObject.info(msg))
-	sys.stdout.write(msg + '\n')
-	if not os.path.isfile(species_tree_file) or not os.path.isfile(expected_similarities_file):
-		os.system('rm -rf %s' % gtotree_outdir)
-
-		actino_hmm_file = lsaBGC_main_directory + '/db/Actinobacteria.hmm'
-		bacteria_hmm_file = lsaBGC_main_directory + '/db/Bacteria.hmm'
-		universal_hmm_file = lsaBGC_main_directory + '/db/Universal_et_al_Hug.hmm'
-
-		gtotree_model_arg = gtotree_model
-		if gtotree_model == 'Actinobacteria' and os.path.isfile(actino_hmm_file): gtotree_model_arg =  actino_hmm_file
-		elif gtotree_model == 'Bacteria' and os.path.isfile(bacteria_hmm_file): gtotree_model_arg = bacteria_hmm_file
-		elif gtotree_model == 'Universal_et_al_Hug' and os.path.isfile(universal_hmm_file): gtotree_model_arg = universal_hmm_file
-
-		gtotree_cmd = ['GToTree', '-g', all_genome_genbank_listing_file, '-H', gtotree_model_arg, '-n', str(max([cpus, 4])),
-					   '-j', str(parallel_jobs_4cpu), '-M', str(max([cpus, 4])), '-o', gtotree_outdir]
-		runCmdViaSubprocess(gtotree_cmd, logObject, check_files=[species_tree_file])
-
-		protein_msa_file = gtotree_outdir + 'Aligned_SCGs.faa'
-		pair_seq_matching = util.determineSeqSimProteinAlignment(protein_msa_file)
-		expected_sim_handle = open(expected_similarities_file, 'w')
-		for s1 in pair_seq_matching:
-			for s2 in pair_seq_matching:
-				exp_sim = str(pair_seq_matching[s1][s2])
-				if s1 == s2: exp_sim = '1.0'
-				expected_sim_handle.write(s1 + '\t' + s2 + '\t' + exp_sim + '\n')
-		expected_sim_handle.close()
-		logObject.info('construction of species tree using GToTree completed.')
-		sys.stdout.write('Construction of species tree using GToTree completed.\n')
-	else:
-		logObject.info('A prior species tree was found so skipping re-running GToTree.')
-		sys.stdout.write('A prior species tree was found so skipping re-running GToTree.\n')
-
-	if not os.path.isfile(population_file):
-		logObject.info('Beginning determination of populations/clades (assuming ).')
-		sys.stdout.write('Beginning determination of populations/clades and dereplication (assuming dereplication not requested to be skipped via -sd flag).\n')
-
-		all_samples = set([])
-		population_pairs = []
-		samples_in_population_pairs = set([])
-		dereplication_pairs = []
-		samples_in_dereplication_pairs = set([])
-		with open(expected_similarities_file) as oedf:
-			for line in oedf:
-				sample1, sample2, exsim = line.strip().split('\t')
-				exsim = float(exsim)
-				all_samples.add(sample1)
-				all_samples.add(sample2)
-				if exsim >= population_threshold:
-					population_pairs.append([sample1, sample2])
-					samples_in_population_pairs.add(sample1)
-					samples_in_population_pairs.add(sample2)
-				if exsim >= dereplicate_threshold:
-					dereplication_pairs.append([sample1, sample2])
-					samples_in_dereplication_pairs.add(sample1)
-					samples_in_dereplication_pairs.add(sample2)
-
-		n50_cmds = []
-		n50_directory = outdir + 'N50_Calculations/'
-		util.setupReadyDirectory([n50_directory])
-		for s, fna in all_genome_listings_fna.items():
-			cmd = ['n50', fna, '>', n50_directory + s + '.txt', logObject]
-			n50_cmds.append(cmd)
-
-		p = multiprocessing.Pool(cpus)
-		p.map(util.multiProcess, n50_cmds)
-		p.close()
-
-		sample_n50s = defaultdict(lambda: 0.0)
-		for f in os.listdir(n50_directory):
-			sample = '.txt'.join(f.split('.txt')[:-1])
-			with open(n50_directory + f) as onf:
-				for line in onf:
-					n50 = float(line.strip())
-					sample_n50s[sample] = n50
-
-		"""	
-		Solution for single-linkage clustering taken from mimomu's response in the stackoverflow page:
-		https://stackoverflow.com/questions/4842613/merge-lists-that-share-common-elements?lq=1
-		"""
-		L = list(dereplication_pairs)
-		LL = set(itertools.chain.from_iterable(L))
-		for each in LL:
-			components = [x for x in L if each in x]
-			for i in components:
-				L.remove(i)
-			L += [list(set(itertools.chain.from_iterable(components)))]
-
-		for s in all_samples:
-			if not s in samples_in_dereplication_pairs:
-				L.append([s])
-
-		samples_to_keep_handle = open(samples_to_keep_file, 'w')
-		for sc in L:
-			cluster_sample_n50 = []
-			for s in sc:
-				cluster_sample_n50.append([s, n50])
-			for i, s in enumerate(sorted(cluster_sample_n50, key=itemgetter(1, 0), reverse=True)):
-				if i == 0:
-					samples_to_keep_handle.write(s[0] + '\n')
-				elif skip_dereplication_flag:
-					samples_to_keep_handle.write(s[0] + '\n')
-		samples_to_keep_handle.close()
-
-		"""	
-		Solution for single-linkage clustering taken from mimomu's response in the stackoverflow page:
-		https://stackoverflow.com/questions/4842613/merge-lists-that-share-common-elements?lq=1
-		"""
-		L = list(population_pairs)
-		LL = set(itertools.chain.from_iterable(L))
-		for each in LL:
-			components = [x for x in L if each in x]
-			for i in components:
-				L.remove(i)
-			L += [list(set(itertools.chain.from_iterable(components)))]
-
-		for s in all_samples:
-			if not s in samples_in_population_pairs:
-				L.append([s])
-
-		pop_spec_handle = open(population_file, 'w')
-		for i, sc in enumerate(L):
-			pop_id = 'Clade_' + str(i)
-			for s in sc:
-				pop_spec_handle.write(s + '\t' + pop_id + '\n')
-		pop_spec_handle.close()
-
-		assert (os.path.isfile(samples_to_keep_file))
-		assert (os.path.isfile(population_file))
-		logObject.info('Completed population/clade inference and dereplication.')
-		logObject.info('Samples kept for analysis can be found at: %s.' % samples_to_keep_file)
-		logObject.info('Population/clading info can be found at: %s.' % population_file)
-		sys.stdout.write('Completed population/clade inference and dereplication.\n')
-		sys.stdout.write('Samples kept for analysis can be found at: %s.\n' % samples_to_keep_file)
-		sys.stdout.write('Population/clading info can be found at: %s.\n' % population_file)
-	else:
-		logObject.info(
-			'Found prior determined population/clade inference and sample listing files. Using them instead of reassessing them.')
-		sys.stdout.write(
-			'Found prior determined population/clade inference and sample listing files. Using them instead of reassessing them.\n')
-
-	count_of_dereplicated_sample_set = 0
-	with open(samples_to_keep_file) as oskf:
-		for line in oskf:
-			count_of_dereplicated_sample_set += 1
-	if (count_of_dereplicated_sample_set > 100) and (not ignore_limits_flag):
-		logObject.error("Currently not recommended to use lsaBGC-Easy for taxa with > 100 genomes after dereplication. In the future this will likely be updated to be a warning, but would rather not risk harming your computer/server!")
-		sys.stderr.write("Currently not recommended to use lsaBGC-Easy for taxa with > 100 genomes\nafter dereplication. In the future this will likely be updated\nto be a warning, but would rather not risk harming\nyour computer/server!")
-		sys.stderr.write("Exiting now, but you can move past this if you feel comfortable and are willing to wait for longer processing times using the -x flag.\n")
-		sys.exit(1)
-	elif (count_of_dereplicated_sample_set > 300):
-		logObject.error("You have >300 genomes after dereplication and probably don't want to continue - OrthoFinder will need to perform a lot of pairwise comparisons... over 90K! You can reperform dereplication using more stringent thresholds to get fewer genomes.")
-		sys.stderr.write("You have >300 genomes after dereplication and probably don't want to continue - OrthoFinder will need to perform a lot of pairwise comparisons... over 90K! You can reperform dereplication using more stringent thresholds to get fewer genomes.\n")
-		sys.stderr.write("Exiting now, if you really must get past this and feel comfortable - you can edit this program.\n")
-		sys.exit(1)
-	else:
-		logObject.info("After dereplication (if performed) there are %d samples/genomes being considered." % count_of_dereplicated_sample_set)
-		sys.stdout.write("After dereplication (if performed) there are %d samples/genomes being considered.\n" % count_of_dereplicated_sample_set)
-
-	checkUlimitSettings(count_of_dereplicated_sample_set, logObject)
-
-	if bgc_prediction_software != 'GECCO':
-		logObject.info("\n--------------------\nStep 4\n--------------------\nStarting creation of %s commands for de novo BGC prediction." % bgc_prediction_software)
-		sys.stdout.write("--------------------\nStep 4\n--------------------\nStarting creation of %s commands for de novo BGC prediction.\n" % bgc_prediction_software)
-	else:
-		logObject.info("\n--------------------\nStep 4\n--------------------\nRunning GECCO for de novo BGC predictions.")
-		sys.stdout.write("--------------------\nStep 4\n--------------------\nRunning GECCO for de novo BGC predictions.\n")
-
+	concat_core_alignment_fasta_file = phylogenate_results_dir + 'Concatenated_MSA.fasta'
+	species_tree_file = phylogenate_results_dir + 'Species_Phylogeny_FastTree2.treefile'
+	if not os.path.isfile(species_tree_file):
+		species_tree_file = phylogenate_results_dir + 'Species_Phylogeny_IQTREE_Phylogeny_mset-WAG-LG_B-1000.treefile'
 	
-	
-	bgc_prediction_count = 0
-	for f in os.listdir(primary_bgc_pred_directory):
-		bgc_prediction_count += 1
-
-	if bgc_prediction_count == 0 and (bgc_prediction_software == 'ANTISMASH' or bgc_prediction_software == 'DEEPBGC'):
-		logObject.error("************************\nLooks like you didn't run the BGC prediction commands (or at least successfully),\nplease run them in a different environment where %s is present in the environment.\nOnly after they have been successfully run and written to the directory:\n%s\ncan you restart the lsaBGC command. Here are the %s commands again:\n%s" % (bgc_prediction_software, primary_bgc_pred_directory, bgc_prediction_software, cmd_file))
-		sys.stderr.write("************************\nLooks like you didn't run the BGC prediction commands (or at least successfully),\nplease run them in a different environment where %s is present in the environment.\nOnly after they have been successfully run and written to the directory:\n%s\ncan you restart the lsaBGC command. Here are the %s commands again:\n%s\n" % (bgc_prediction_software, primary_bgc_pred_directory, bgc_prediction_software, cmd_file))
+	try:
+		assert(os.path.isfile(species_tree_file) or os.path.isfile(concat_core_alignment_fasta_file))
+	except:
+		msg = 'Issue validating the existence of species phylogeny or concatenated core FASTA files'
+		logObject.error(msg)
+		sys.stderr.write(msg + '\n')
 		sys.exit(1)
-	elif bgc_prediction_count == 0:
-		logObject.error("************************\nLooks like no BGCs were predicted in any of your genomes, thus there is not much we can do\ndownstream - perhaps try running antiSMASH/GECCO/DeepBGC for a few genomes to confirm this isn\t' an lsaBGC configuration issue.',\nplease run them in a different environment where %s is present in the environment.\nOnly after they have been successfully run and written to the directory:\n%s\ncan you restart the lsaBGC command. Here are the paths to the %s commands again:\n%s" % (bgc_prediction_software, cmd_file))
-		sys.stderr.write("************************\nLooks like no BGCs were predicted in any of your genomes, thus there is not much we can do\ndownstream - perhaps try running antiSMASH/GECCO/DeepBGC for a few genomes to confirm this isn\t' an lsaBGC configuration issue.',\nplease run them in a different environment where %s is present in the environment.\nOnly after they have been successfully run and written to the directory:\n%s\ncan you restart the lsaBGC command. Here are the paths to the %s commands again:\n%s\n" % (bgc_prediction_software, cmd_file))
+
+	# Step 4: Determine populations
+	msg = '--------------------\nStep 4: Stratifying populations\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+
+	popstrat_results_dir = outdir + 'Delineate_Populations/'
+	popstrat_cmd = ['popstrat', '-a', concat_core_alignment_fasta_file, '-p', species_tree_file, 
+					'-t', '-i', str(population_identify_cutoff), '-o', popstrat_results_dir]
+
+	popstrat_file = popstrat_results_dir + 'Sample_to_Population.txt'
+	util.runCmdViaSubprocess(popstrat_cmd, logObject=logObject, check_files=[popstrat_file])
+
+	# Step 5: Cluster BGCs into eGCFs
+	msg = '--------------------\nStep 5: Clustering BGCs into eGCFs\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+
+	cluster_results_dir = outdir + 'eGCF_Clustering/'
+	cluster_pair_file = cluster_results_dir + 'bgc_pair_relationships.txt'
+	gcf_listing_dir = cluster_results_dir + 'GCF_Listings/'
+	lsabgc_cluster_cmd = ['lsaBGC-Cluster', '-b', simple_BGC_listing_file, '-m', ortholog_matrix_file,
+                          '-c', str(threads), '-o', cluster_results_dir, '-r', str(cluster_syntenic_correlation),
+                          '-i', str(cluster_inflation_param), '-j', str(cluster_jaccard_param), '-t']
+ 
+	util.runCmdViaSubprocess(lsabgc_cluster_cmd, logObject=logObject, check_directories=[gcf_listing_dir], check_files=[cluster_pair_file])
+
+	gcf_count = 0
+	for f in os.listdir(gcf_listing_dir):
+		gcf_count += 1
+	
+	try:
+		assert(gcf_count > 0)
+	except:
+		msg = 'No GCFs found in the GCF_Listings/ directory at: %s' % gcf_listing_dir
+		logObject.error(msg)
+		sys.stderr.write(msg + '\n')
+		sys.exit(1)
+
+
+	bgc_id_to_gbk = {}
+	sample_index = defaultdict(int)
+	with open(simple_BGC_listing_file) as osblf:
+		for i, line in enumerate(osblf):
+			line = line.strip()
+			try:
+				assert (len(line.split('\t')) == 3)
+			except Exception as e:
+				msg = "More or less than three columns exist at line %d in BGC specification/listing file. Exiting now ..." % (i + 1)
+				logObject.error(msg)
+				logObject.error(traceback.format_exc())
+				sys.stderr.write(msg + '\n')
+				sys.exit(1)
+
+			sample, bgc_gbk, _ = line.split('\t')
+			sample = util.cleanUpSampleName(sample)
+			assert (util.is_genbank(bgc_gbk))
+			bgc_id = sample
+			if sample_index[sample] > 0:
+				bgc_id = sample + '_' + str(sample_index[sample] + 1)
+			bgc_id_to_gbk[bgc_id] = bgc_gbk
+			sample_index[sample] += 1
+
+	pairwise_relations = defaultdict(lambda: defaultdict(float))
+	with open(cluster_pair_file) as ocpf:
+		for line in ocpf:
+			line = line.strip()
+			ls = line.split('\t')
+			pairwise_relations[bgc_id_to_gbk[ls[0]]][bgc_id_to_gbk[ls[1]]] = float(ls[2])
+
+	# Step 6: Taking a break for user examination of clustering and population delineation
+	msg = '--------------------\nStep 6: Taking a break for user examination of GCF clustering and population delineations\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+
+	step_6_checkpoint_file = check_dir + 'Step_6.txt'
+	if not os.path.isfile(step_6_checkpoint_file) and not no_break_flag:
+
+		msg_about_manual_param_selection = """
+Breaking workflow! 
+------------------
+This is to give you an opportunity to adjust parameters for eGCF
+clustering and population stratification based on manual assessment
+of the PDF report showing the impact of parameters on clustering
+found at: %s 
+and PDF graphics of the species phylogeny with 
+different population divisions marked which can be found in the 
+directory %s. 
+		""" % (cluster_results_dir + '', popstrat_results_dir + '')
+	
+		logObject.info(msg_about_manual_param_selection)
+		sys.stdout.write(msg_about_manual_param_selection + '\n')
+		os.system('touch ' + step_6_checkpoint_file)
 		sys.exit(0)
 
-	primary_bgcs_listing_file = outdir + 'BGCs_in_Primary_Genomes.txt'
-	if not os.path.isfile(primary_bgcs_listing_file):
-		for s in os.listdir(primary_bgc_pred_directory):
-			samp_dir = primary_bgc_pred_directory + s + '/'
-			for f in os.listdir(samp_dir):
-				if f.endswith('.gbk') and '.region' in f:
-					os.system('mv %s %s' % (samp_dir + f, samp_dir + s + '.' + f))
-		list_primary_bgc_cmd = ['listAllBGCGenbanksInDirectory.py', '-i', primary_bgc_pred_directory, '-p',
-								bgc_prediction_software, '>', primary_bgcs_listing_file]
-		if not include_incomplete_bgcs_flag:
-			list_primary_bgc_cmd += ['-f']
-		runCmdViaSubprocess(list_primary_bgc_cmd, logObject, check_files=[primary_bgcs_listing_file])
+	bgc_to_gcf = {}
+	for f in os.listdir(gcf_listing_dir):
+		gcf_file = gcf_listing_dir + f
+		gcf_id = f.split('.txt')[0]
+		with open(gcf_file) as ogf:
+			for line in ogf:
+				bgc_path = line.strip()
+				bgc_to_gcf[bgc_path] = gcf_id
+	
+	sample_to_pop = {}
+	with open(popstrat_file) as opf:
+		for i, line in enumerate(opf):
+			if i == 0: continue
+			line = line.strip()
+			ls = line.split('\t')
+			sample_to_pop[ls[0]] = ls[1]
 
-	logObject.info("Primary BGC predictions appear successful and are listed for samples/genomes at:\n%s" % primary_bgcs_listing_file)
-	sys.stdout.write("Primary BGC predictions appear successful and are listed for samples/genomes at:\n%s\n" % primary_bgcs_listing_file)
+	detailed_BGC_listing_with_Pop_and_GCF_map_file = outdir + 'Detailed_BGC_Listing.with_Population_and_GCF_Labels.txt'
+	dblf_handle = open(detailed_BGC_listing_with_Pop_and_GCF_map_file, 'w')
+	
+	dblf_handle.write('\t'.join(['sample', 'population', 'method', 'genome_path', 'bgc_id', 'bgc_path', 'gcf_id', 'scaffold', 'start', 'end', 'dist_to_edge']) + '\n')
+	with open(detailed_BGC_listing_file) as odblf:
+		for i, line in enumerate(odblf):
+			if i == 0: continue
+			line = line.strip()
+			ls = line.split('\t')
+			pop = sample_to_pop[ls[0]]
+			gcf = bgc_to_gcf[ls[4]]
+			updated_ls = [ls[0], pop] + ls[1:5] + [gcf] + ls[5:] 
+			dblf_handle.write('\t'.join(updated_ls) + '\n')
+	dblf_handle.close()
+	
+	# Step 7: Running zol
+	msg = '--------------------\nStep 7: Running zol analyses\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+	step_7_checkpoint_file = check_dir + 'Step_7.txt'
+	zol_results_dir = outdir + 'zol_Results/'
+	zol_comp_results_dir = zol_results_dir + 'Comprehensive/'
+	zol_full_results_dir = zol_results_dir + 'Complete_Instances/'
+	if not os.path.isfile(step_7_checkpoint_file):
+		util.setupReadyDirectory([zol_results_dir, zol_comp_results_dir, zol_full_results_dir])
+		ortholog_listing_file = util.reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject)
+		util.runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, multi_thread, parallel_jobs_4thread, logObject)
+		os.system('touch %s' % step_7_checkpoint_file)
 
-	# Step 5: Run lsaBGC-Ready.py with lsaBGC-Cluster or BiG-SCAPE
-	logObject.info('\n--------------------\nStep 5\n--------------------\nBeginning clustering of BGCs using either lsaBGC-Cluster (default) or BiG-SCAPE (can be requested).')
-	sys.stdout.write('--------------------\nStep 5\n--------------------\nBeginning clustering of BGCs using either lsaBGC-Cluster (default) or BiG-SCAPE (can be requested).\n')
-	bigscape_listing_file = lsaBGC_main_directory + 'external_tools/bigscape_location.txt'
-	bigscape_prog_location, pfam_directory = [None] * 2
-	if os.path.isfile(bigscape_listing_file):
-		bigscape_prog_location, pfam_directory = open(bigscape_listing_file).readlines()[0].strip().split('\t')
-	bigscape_results_dir = outdir + 'BiG_SCAPE_Clustering_Results/'
-	if use_bigscape_flag and not os.path.isdir(bigscape_results_dir) and os.path.isfile(bigscape_prog_location):
-		bigscape_cmd = ['python', bigscape_prog_location, '-i', primary_bgc_pred_directory, '-o', bigscape_results_dir,
-						'-c', str(cpus), '--pfam_dir', pfam_directory, bigscape_options]
-		bsout = open(outdir+'bigscape_stdout.log', 'w')
-		bserr = open(outdir+'bigscape_stderr.log', 'w')
-		runCmdViaSubprocess(bigscape_cmd, logObject, check_directories=[bigscape_results_dir], stdout=bsout, stderr=bserr)
-		bsout.close()
-		bserr.close()
-		try:
-			assert (os.path.isdir(bigscape_results_dir + 'network_files/'))
-		except:
-			logObject.error("Something unexpected in BiG-SCAPE processing occurred.")
-			sys.stderr.write("Something unexpected in BiG-SCAPE processing occurred.\n")
-			exit(1)
+	# Step 8: Running GSeeF, lsaBGC-See and lsaBGC-ComprehenSeeIve
+	msg = '--------------------\nStep 8: Running GSeeF, lsaBGC-See, and lsaBGC-ComprehenSeeIve analyses\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+	step_8_checkpoint_file = check_dir + 'Step_8.txt'
+	visual_results_dir = final_dir + 'Visualizations/'
+	gseef_dir = visual_results_dir + 'GSeeF_Results/'
+	see_dir = visual_results_dir + 'lsaBGC_See_Results/'
+	compsee_dir = visual_results_dir + 'lsaBGC_ComprehenSeeIve_Results/'
+	if not os.path.isfile(step_8_checkpoint_file):
+		util.setupReadyDirectory([visual_results_dir, see_dir, compsee_dir])
+		gseef_cmd = ['GSeeF', '-g', detailed_BGC_listing_with_Pop_and_GCF_map_file, '-s', species_tree_file, '-o', gseef_dir]
+		util.runCmdViaSubprocess(gseef_cmd, logObject, check_directories=[gseef_dir])
+		util.runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, species_tree_file, ortholog_matrix_file, 
+								      see_dir, compsee_dir, threads, logObject)
+		os.system('touch %s' % step_8_checkpoint_file)
 
-	lsabgc_ready_directory = outdir + 'lsaBGC_Ready_Results/'
-	lsabgc_ready_results_directory = lsabgc_ready_directory + 'Final_Results/'
-	annotation_listing_file = lsabgc_ready_results_directory + 'Primary_Sample_Annotation_Files.txt'
-	gcf_listing_dir = lsabgc_ready_results_directory + 'GCF_Listings/'
-	orthogroups_matrix_file = lsabgc_ready_results_directory + 'Orthogroups.tsv'
-	if not os.path.isdir(lsabgc_ready_results_directory) or len(
-			[f for f in os.listdir(lsabgc_ready_results_directory)]) <= 2:
-		os.system('rm -rf %s' % lsabgc_ready_directory)
-		lsabgc_ready_cmd = ['lsaBGC-Ready.py', '-i', primary_genomes_listing_file, '-l', primary_bgcs_listing_file,
-							'-o', lsabgc_ready_directory, '-c', str(cpus), '-p', bgc_prediction_software,
-							'-om', ortholog_method]
+	# Step 9: Running lsaBGC-MIBiGMapper
+	msg = '--------------------\nStep 9: Parallel running of lsaBGC-MIBiGMapper\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+	step_9_checkpoint_file = check_dir + 'Step_9.txt'
+	mibig_dir = outdir + 'lsaBGC_MIBiG-Mapper/'
+	if not os.path.isfile(step_9_checkpoint_file):
+		util.setupReadyDirectory([mibig_dir])
+		util.runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matrix_file, mibig_dir, 
+					        multi_thread, parallel_jobs_4thread, logObject)
+		os.system('touch %s' % step_9_checkpoint_file)
 
-		if use_bigscape_flag and os.path.isdir(bigscape_results_dir):
-			lsabgc_ready_cmd += ['-b', bigscape_results_dir]
-		else:
-			lsabgc_ready_cmd += ['-lc', '-lci', str(lsabgc_cluster_inflation), '-lcj', str(lsabgc_cluster_jaccard),
-								 '-lcr', str(lsabgc_cluster_synteny)]
-		if use_pyrodigal:
-			lsabgc_ready_cmd += ['-py']
-		if run_coarse_orthofinder:
-			lsabgc_ready_cmd += ['-mc']
+	# Step 10: Parallel running of lsaBGC-Reconcile (for horizontal transfer assessment) and lsaBGC-Sociate
+	msg = '--------------------\nStep 10: Running lsaBGC-Reconcile and lsaBGC-Sociate\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+	step_10_checkpoint_file = check_dir + 'Step_10.txt'
+	recon_dir = visual_results_dir + 'lsaBGC_Reconcile_Results/'
+	sociate_dir = outdir + 'lsaBGC_Sociate_Results/'
+	bgc_lt_listing_file = outdir + 'BGC_LocusTag_to_Orthogroup_GCF_and_Population_Mappings.txt'
+	if not os.path.isfile(step_8_checkpoint_file):
+		util.setupReadyDirectory([recon_dir, sociate_dir])
+		util.runReconcileAndSociate(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matrix_file, 
+					      		    bgc_lt_listing_file, recon_dir, sociate_dir, multi_thread, 
+						            parallel_jobs_4thread, logObject)
+		os.system('touch %s' % step_10_checkpoint_file)
 
-		db_listing_file = lsaBGC_main_directory + '/db/database_location_paths.txt'
-		if os.path.isfile(db_listing_file):
-			lsabgc_ready_cmd += ['-a']
-		runCmdViaSubprocess(lsabgc_ready_cmd, logObject,
-							check_directories=[lsabgc_ready_results_directory, gcf_listing_dir],
-							check_files=[annotation_listing_file, orthogroups_matrix_file])
-
-	# Step 6: Run lsaBGC-AutoExpansion.py polishing to find GCF instances fragmented on multiple scaffolds
-	if perform_auto_expansion_flag:
-		logObject.info('\n--------------------\nStep 6\n--------------------\nBeginning identification of fragmented BGC instances using completed instances as references with lsaBGC-AutoExpansion.')
-		sys.stdout.write('--------------------\nStep 6\n--------------------\nBeginning identification of fragmented BGC instances using completed instances as references with lsaBGC-AutoExpansion.\n')
-
-	checkLsaBGCInputsExist(annotation_listing_file, gcf_listing_dir, orthogroups_matrix_file)
-
-	lsabgc_autoexpansion_results_directory = outdir + 'lsaBGC_AutoExpansion_Results/'
-	exp_annotation_listing_file = lsabgc_autoexpansion_results_directory + 'Sample_Annotation_Files.txt'
-	exp_orthogroups_matrix_file = lsabgc_autoexpansion_results_directory + 'Orthogroups.expanded.tsv'
-	exp_gcf_listing_dir = lsabgc_autoexpansion_results_directory + 'Updated_GCF_Listings/'
-
-	if not os.path.isdir(exp_gcf_listing_dir) and perform_auto_expansion_flag:
-		lsabgc_expansion_cmd = ['lsaBGC-AutoExpansion.py', '-g', gcf_listing_dir, '-m', orthogroups_matrix_file, '-l',
-								annotation_listing_file, '-e', annotation_listing_file, '-q', '-c', str(cpus),
-								'-o', lsabgc_autoexpansion_results_directory, '-p', bgc_prediction_software]
-		runCmdViaSubprocess(lsabgc_expansion_cmd, logObject,
-							check_directories=[lsabgc_autoexpansion_results_directory, exp_gcf_listing_dir],
-							check_files=[exp_orthogroups_matrix_file, exp_orthogroups_matrix_file])
-
-	if not perform_auto_expansion_flag:
-		exp_annotation_listing_file = annotation_listing_file
-		exp_orthogroups_matrix_file = orthogroups_matrix_file
-		exp_gcf_listing_dir = gcf_listing_dir
-
-	# Step 7: Run lsaBGC-AutoAnalyze.py
-	logObject.info('\n--------------------\nStep 7\n--------------------\nBeginning lsaBGC-AutoAnalyze (which runs lsaBGC-See.py, lsaBGC-PopGene.py, and lsaBGC-Divergence.py + summarizes results across GCFs at the end.\n')
-	sys.stdout.write('--------------------\nStep 7\n--------------------\nBeginning lsaBGC-AutoAnalyze (which runs lsaBGC-See.py, lsaBGC-PopGene.py,\nand lsaBGC-Divergence.py + summarizes results across GCFs at the end.\n')
-
-	checkLsaBGCInputsExist(exp_annotation_listing_file, exp_gcf_listing_dir, exp_orthogroups_matrix_file)
 	try:
-		assert (os.path.isfile(species_tree_file) and os.path.isfile(expected_similarities_file) and os.path.isfile(
-			samples_to_keep_file))
+		assert(os.path.isfile(og_to_gcf_and_pop_file))
 	except:
-		raise RuntimeError("Issue validating GToTree construction in lsaBGC-Ready was successful.")
-
-	lsabgc_autoanalyze_dir = outdir + 'lsaBGC_AutoAnalyze_Results/'
-	lsabgc_autoanalyze_results_dir = lsabgc_autoanalyze_dir + 'Final_Results/'
-	if not os.path.isdir(lsabgc_autoanalyze_results_dir):
-		os.system('rm -rf %s' % lsabgc_autoanalyze_dir)
-		lsabgc_autoanalyze_cmd = ['lsaBGC-AutoAnalyze.py', '-i', exp_annotation_listing_file, '-g', exp_gcf_listing_dir,
-								  '-mb', '-m', exp_orthogroups_matrix_file, '-s', species_tree_file, '-w',
-								  expected_similarities_file, '-k', samples_to_keep_file, '-c', str(cpus), '-o',
-								  lsabgc_autoanalyze_dir, '-p', bgc_prediction_software, '-u', population_file,
-								  '-ogm', orthogroups_matrix_file]
-		runCmdViaSubprocess(lsabgc_autoanalyze_cmd, logObject, check_directories=[lsabgc_autoanalyze_results_dir])
-
-
-	# Step 8: Run GSeeF.py
-	logObject.info('\n--------------------\nStep 8\n--------------------\nBeginning GSeeF analysis.')
-	sys.stdout.write('--------------------\nStep 8\n--------------------\nBeginning GSeeF analysis.')
-
-	gseef_results_dir = outdir + 'GSeeF_Results/'
-	gseef_final_results_dir = gseef_results_dir + 'Final_Results/'
-	if not os.path.isdir(gseef_results_dir):
-		os.system('rm -rf %s' % gseef_results_dir)
-
-		pruned_species_tree_file = outdir + 'Species_Tree.pruned.tre'
-		try:
-			samples_to_keep_list = []
-			with open(samples_to_keep_file) as ostkf:
-				for line in ostkf:
-					line = line.strip()
-					samples_to_keep_list.append(line.strip())
-			t = Tree(species_tree_file)
-			t.prune(samples_to_keep_list)
-			t.write(format=1, outfile=pruned_species_tree_file)
-		except Exception as e:
-			sys.stderr.write('Issues with creating pruned species tree for GSeeF analysis!\n')
-			sys.stderr.write(e + '\n')
-			logObject.error('Issues with creating pruned species tree for GSeeF analysis!')
-			sys.exit(1)
-
-		gseef_cmd = ['GSeeF.py', '-l', exp_annotation_listing_file, '-g', exp_gcf_listing_dir,
-					 '-s', pruned_species_tree_file,  '-c', str(cpus),
-					 '-o', gseef_results_dir, '-p', bgc_prediction_software]
-		runCmdViaSubprocess(gseef_cmd, logObject, check_directories=[gseef_final_results_dir])
+		msg = 'Unable to validate the file %s exists, exiting ...'
+		sys.stderr.write(msg + '\n')
+		logObject.error(msg)
+		sys.exit(1)
+	
+	# Step 11: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate results
+	
 
 	# Close logging object and exit
-	logObject.info('lsaBGC-Easy completed! Check out the major results in the folder: %s' % lsabgc_autoanalyze_results_dir)
-	sys.stdout.write('lsaBGC-Easy completed! Check out the major results (from lsaBGC-AutoAnalyze) in the folder:\n%s\n' % lsabgc_autoanalyze_results_dir)
-	sys.stdout.write('And for a coarse view of GCFs across a species phylogeny check out the GSeeF output at:\n%s\n' % gseef_final_results_dir)
+	msg = 'lsaBGC-Easy completed! Check out the major results in the folder: %s' % final_dir
+	logObject.info(msg)
+	sys.stdout.write(msg + '\n')
 	util.closeLoggerObject(logObject)
 	sys.exit(0)
-
-
-def runCmdViaSubprocess(cmd, logObject, check_files=[], check_directories=[], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL):
-	logObject.info('Running %s' % ' '.join(cmd))
-	try:
-		subprocess.call(' '.join(cmd), shell=True, stdout=stdout, stderr=stderr,
-						executable='/bin/bash')
-		for cf in check_files:
-			assert (os.path.isfile(cf))
-		for cd in check_directories:
-			assert (os.path.isdir(cd))
-		logObject.info('Successfully ran: %s' % ' '.join(cmd))
-	except:
-		logObject.error('Had an issue running: %s' % ' '.join(cmd))
-		logObject.error(traceback.format_exc())
-		raise RuntimeError('Had an issue running: %s' % ' '.join(cmd))
-
-
-def checkUlimitSettings(num_genomes, logObject):
-	# Check ulimit settings!
-	num_files = num_genomes * num_genomes
-	uH = subprocess.check_output('ulimit -Hn', shell=True)
-	uS = subprocess.check_output('ulimit -Sn', shell=True)
-	uH = uH.decode('utf-8').strip()
-	uS = uS.decode('utf-8').strip()
-	if uH != 'unlimited':
-		uH = int(uH)
-	else:
-		uH = 1e15
-	if uS != 'unlimited':
-		uS = int(uS)
-	else:
-		uS = 1e15
-	if num_files > uS:
-		logObject.warning(
-			"Because many files will be produced and need to be read at once by OrthoFinder2, we are increasing the current shell's limits! Five second pause to allow you to exit the program if you do not which to continue")
-		sleep(5)
-		resource.setrlimit(resource.RLIMIT_NOFILE, (250000, 250000))
-	if num_files > uH:
-		logObject.error(
-			"Too many files will be produced and need to be read at once by OrthoFinder2. Your system requires root privs to change this, which I do not recommend. See the following OrthoFinder2 Github issue for more details: https://github.com/davidemms/OrthoFinder/issues/384")
-		sys.stderr.write(
-			"Too many files will be produced and need to be read at once by OrthoFinder2. Your system requires root privs to change this, which I do not recommend. See the following OrthoFinder2 Github issue for more details: https://github.com/davidemms/OrthoFinder/issues/384")
-		sys.exit()
-	if num_files < uS and num_files < uH:
-		logObject.info(
-			"Great news! Your ulimit settings look good and we believe OrthoFinder2 should be able to run smoothly!")
-
-
-def checkModelIsValid(gtotree_model, docker_mode=False):
-	if not docker_mode:
-		try:
-			assert (gtotree_model in set(['Actinobacteria', 'Alphaproteobacteria', 'Bacteria', 'Archaea',
-										  'Bacteria_and_Archaea', 'Bacteroidetes', 'Betaproteobacteria', 'Chlamydiae',
-										  'Cyanobacteria', 'Epsilonproteobacteria', 'Firmicutes', 'Gammaproteobacteria',
-										  'Proteobacteria', 'Tenericutes', 'Universal_Hug_et_al']))
-		except:
-			raise RuntimeError('Model for GToTree specified is not a valid model!')
-	else:
-		try:
-			assert (gtotree_model in set(['Actinobacteria', 'Bacteria', 'Universal_Hug_et_al']))
-		except:
-			raise RuntimeError('Only GToTree SCC models for Actinobacteria, Bacteria, and Universal_Hug_et_al are available in Docker mode!\n')
-
-def checkLsaBGCInputsExist(annotation_listing_file, gcf_listing_dir, orthogroups_matrix_file):
-	try:
-		assert (os.path.isfile(annotation_listing_file))
-	except:
-		raise RuntimeError("Issues validating the presence of the sample annotation files listing expected!")
-
-	try:
-		assert (os.path.isfile(orthogroups_matrix_file))
-	except:
-		raise RuntimeError("Issue validating the presence of an OrthoFinder homolog group by sample matrix file!")
-
-	try:
-		assert (os.path.isdir(gcf_listing_dir))
-	except:
-		raise RuntimeError("Issues validating the presence of a directory with GCF listings!")
-
 
 if __name__ == '__main__':
 	lsaBGC()

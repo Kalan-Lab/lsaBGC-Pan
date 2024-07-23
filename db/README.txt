@@ -1,1 +1,0 @@
-Default space for downloading PGAP and KOFam annotation databases.

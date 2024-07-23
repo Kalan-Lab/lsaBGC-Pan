@@ -1,0 +1,186 @@
+# !/usr/bin/env python
+
+### Program: lsaBGC-Sociate
+### Author: Rauf Salamzade
+### Kalan Lab
+### UW Madison, Department of Medical Microbiology and Immunology
+
+# BSD 3-Clause License
+#
+# Copyright (c) 2024, Kalan-Lab
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import os
+import sys
+from time import sleep
+import argparse
+from lsaBGC import util
+from lsaBGC.classes.GCF import GCF
+import warnings
+import traceback
+import subprocess
+
+warnings.filterwarnings('ignore')
+
+def create_parser():
+    """ Parse arguments """
+    parser = argparse.ArgumentParser(description="""
+	Program: lsaBGC-Sociate
+	Author: Rauf Salamzade
+	Affiliation: Kalan Lab, UW Madison, Department of Medical Microbiology and Immunology
+
+	This program runs pyseer (Lees, Galardini et al. 2018) to assess co-occurence associations
+    or dissocations between orthogroups found in BGC contexts and other orthogroups found 
+    across genomes.                  
+    
+    Draws inspiration from the software/studies: 
+      - Coinfinder by Whelan et al. 2020
+      - Study by Beavan, Domingo-Sananes, and McInerney et al. 2023
+      - Study by Mohite et al. 2022
+      - Goldfinder by Gavriildou, Paulitz and Resl et al. 2024     
+      - Study by Wang, Chen, and Cruz-Morales et al. 2024                                  
+    """, formatter_class=argparse.RawTextHelpFormatter)
+
+    parser.add_argument('-l', '--lsabgc_detailed_listing', help='lsaBGC-Pan detailed listing with GCF and population structure information.', required=True)
+    parser.add_argument('-m', '--orthomatrix', help='OrthoFinder/Panaroo ortholog by sample matrix.', required=True)
+    parser.add_argument('-o', '--output_directory', help="Output directory.", required=True)
+    parser.add_argument('-s', '--species_phylogeny', help="The species phylogeny in Newick format.", required=True)
+    parser.add_argument('-c', '--threads', type=int, help="Number of threads to use for MCL step [Default is 1].", required=False, default=1)
+
+    args = parser.parse_args()
+    return args
+
+def lsaBGC_Sociate():
+    """
+    Void function which runs primary workflow for program.
+    """
+
+    """
+    PARSE REQUIRED INPUTS
+    """
+    myargs = create_parser()
+
+    lsabgc_detailed_listing = os.path.abspath(myargs.lsabgc_detailed_listing)
+    orthofinder_matrix_file = os.path.abspath(myargs.orthomatrix)
+    outdir = os.path.abspath(myargs.output_directory) + '/'
+    species_tree = os.path.abspath(myargs.species_tree) + '/'
+
+    ### vet input files quickly
+    try:
+        assert (os.path.isfile(orthofinder_matrix_file))
+        assert (os.path.isfile(lsabgc_detailed_listing))
+    except:
+        raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
+
+    if os.path.isdir(outdir):
+        sys.stderr.write("Output directory exists. Overwriting in 5 seconds ...\n ")
+        sleep(5)
+
+    util.setupReadyDirectory([outdir, scratchdir])
+
+    """
+    PARSE OPTIONAL INPUTS
+    """
+
+    threads = myargs.threads
+
+    """
+    START WORKFLOW
+    """
+    # create logging object
+    log_file = outdir + 'Progress.log'
+    logObject = util.createLoggerObject(log_file)
+    version_string = util.parseVersionFromSetupPy()
+    logObject.info('Running lsaBGC version %s' % version_string)
+
+    # Log input arguments and update reference and query FASTA files.
+    logObject.info("Saving parameters for future records.")
+    parameters_file = outdir + 'Parameter_Inputs.txt'
+    parameter_values = [lsabgc_detailed_listing, orthofinder_matrix_file, outdir, species_tree, high_quality_flag, threads]
+    parameter_names = ["Detailed BGC Information File", "Ortholog by Sample Matrix File", "Output Directory",
+                       "Species Phylogeny", "Threads"]
+    util.logParametersToFile(parameters_file, parameter_names, parameter_values)
+    logObject.info("Done saving parameters!")
+
+    # Step 0: Download pyseer scripts 
+    pyseer_script_dir = outdir + 'pyseer_scripts/'
+    util.setupReadyDirectory([pyseer_script_dir])
+
+    msg = 'Downloading pyseer scripts count_patterns.py and phylogeny_distance.py'
+    sys.stdout.write(msg + '\n')
+    logObject.info(msg)
+    
+    cp_script = pyseer_script_dir + 'count_patterns.py'
+    pd_script = pyseer_script_dir + 'phylogeny_distance.py'
+    axel_cmd_1 = ['axel', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/count_patterns.py', '-o', cp_script]
+    axel_cmd_2 = ['axel', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/phylogeny_distance.py', '-o', pd_script]
+    try:
+        util.runCmdViaSubprocess(axel_cmd_1, logObject=logObject, check_files=[cp_script])
+        util.runCmdViaSubprocess(axel_cmd_2, logObject=logObject, check_files=[pd_script])
+    except:
+        msg = 'Had issues downloading pyseer auxiliary scripts!'
+        sys.stderr.write(msg + '\n')
+        sys.stderr.write(traceback.format_exc() + '\n')
+        logObject.error(msg)
+        logObject.error(traceback.format_exc())
+        sys.exit(1)
+
+    # Step 1: Convert species tree to kinship-esque matrix
+    kinship_matrix = outdir + 'Kinship_Matrix.txt'
+    phylo_dist_cmd = ['python', pd_script, '--lmm', species_tree, '>', ]             
+    try:
+        util.runCmdViaSubprocess(phylo_dist_cmd, logObject=logObject, check_files=[kinship_matrix])
+    except:
+        msg = 'Issue generating kinship matrix from species phylogeny using the command: %s' % phylo_dist_cmd
+        sys.stderr.write(msg + '\n')
+        sys.stderr.write(traceback.format_exc() + '\n')
+        logObject.error(msg)
+        logObject.error(traceback.format_exc())
+        sys.exit(1)
+
+    # Step 2: Create genotype matrix of orthog groups presence/absence info 
+
+
+    # Step 3: Create phenotype type files for BGC ortholog groups of interest and run pyseer
+
+    # Step 4: Determine thresholds for significance
+
+    # Step 5: Consolidate into one final table
+
+    # Write checkpoint file 
+    checkpoint_file = outdir + 'CHECKPOINT.txt'
+    checkpoint_handle = open(checkpoint_file, 'w')
+    checkpoint_handle.write('lsaBGC-Sociate completed successfully!')
+    checkpoint_handle.close()
+
+    # Close logging object and exit
+    util.closeLoggerObject(logObject)
+    sys.exit(0)
+
+if __name__ == '__main__':
+    lsaBGC_Sociate()

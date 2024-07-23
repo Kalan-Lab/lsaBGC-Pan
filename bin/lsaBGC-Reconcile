@@ -1,0 +1,392 @@
+# !/usr/bin/env python
+
+### Program: lsaBGC-Reconcile
+### Author: Rauf Salamzade
+### Kalan Lab
+### UW Madison, Department of Medical Microbiology and Immunology
+
+# BSD 3-Clause License
+#
+# Copyright (c) 2024, Kalan-Lab
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import os
+import sys
+from time import sleep
+import argparse
+from lsaBGC import util
+import warnings
+from collections import defaultdict
+from Bio import SeqIO
+import multiprocessing
+import traceback
+from ete3 import Tree
+
+warnings.filterwarnings('ignore')
+
+def create_parser():
+    """ Parse arguments """
+    parser = argparse.ArgumentParser(description="""
+	Program: lsaBGC-Reconcile
+	Author: Rauf Salamzade
+	Affiliation: Kalan Lab, UW Madison, Department of Medical Microbiology and Immunology
+
+	This program creates creates protein alignments for each ortholog group found within 
+    a BGC context and creates visuals of them.
+
+    It draws a lot of inspiration from CORASON and EvoMining. 
+    """, formatter_class=argparse.RawTextHelpFormatter)
+
+    parser.add_argument('-l', '--lsabgc_detailed_listing', help='lsaBGC-Pan detailed listing with GCF and population structure information.', required=True)
+    parser.add_argument('-m', '--orthomatrix', help='OrthoFinder/Panaroo ortholog by sample matrix.', required=True)
+    parser.add_argument('-o', '--output_directory', help="Output directory.", required=True)
+    parser.add_argument('-s', '--species_phylogeny', help="The species phylogeny in Newick format.", required=True)
+    parser.add_argument('-sd', '--scratch_directory', help="Scratch directory for generating alignments and trees.", required=True)
+    parser.add_argument('-q', '--high_quality', action='store_true', help="Run MUSCLE align instead of super5.", required=False, default=False)
+    parser.add_argument('-c', '--threads', type=int, help="Number of threads to use for MCL step [Default is 1].", required=False, default=1)
+
+    args = parser.parse_args()
+    return args
+
+def lsaBGC_Reconcile():
+    """
+    Void function which runs primary workflow for program.
+    """
+
+    """
+    PARSE REQUIRED INPUTS
+    """
+    myargs = create_parser()
+
+    lsabgc_detailed_listing = os.path.abspath(myargs.lsabgc_detailed_listing)
+    orthofinder_matrix_file = os.path.abspath(myargs.orthomatrix)
+    outdir = os.path.abspath(myargs.output_directory) + '/'
+    species_tree_file = os.path.abspath(myargs.species_phylogeny)
+    scratchdir = os.path.abspath(myargs.scratch_directory) + '/'
+
+    ### vet input files quickly
+    try:
+        assert (os.path.isfile(orthofinder_matrix_file))
+        assert (os.path.isfile(lsabgc_detailed_listing))
+    except:
+        raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
+
+    if os.path.isdir(outdir):
+        sys.stderr.write("Output directory exists. Overwriting in 5 seconds ...\n ")
+        sleep(5)
+
+    util.setupReadyDirectory([outdir, scratchdir])
+
+    """
+    PARSE OPTIONAL INPUTS
+    """
+
+    high_qual_flag = myargs.high_quality
+    threads = myargs.threads
+
+    parallel_jobs_4thread = max(math.floor(threads / 4), 1)
+    multi_thread = 4
+    if threads < 4:
+        multi_thread = threads
+        parallel_jobs_4thread = 1
+
+    """
+    START WORKFLOW
+    """
+    # create logging object
+    log_file = outdir + 'Progress.log'
+    logObject = util.createLoggerObject(log_file)
+    version_string = util.parseVersionFromSetupPy()
+    logObject.info('Running lsaBGC version %s' % version_string)
+
+    # Log input arguments and update reference and query FASTA files.
+    logObject.info("Saving parameters for future records.")
+    parameters_file = outdir + 'Parameter_Inputs.txt'
+    parameter_values = [lsabgc_detailed_listing, orthofinder_matrix_file, outdir, scratchdir, species_tree_file, 
+                        high_qual_flag, threads]
+    parameter_names = ["Detailed BGC Information File", "Ortholog by Sample Matrix File", "Output Directory",
+                       "Scratch Direcotry", "Species Phylogeny File", "High Quality Alignment Requested?", 
+                       "Threads"]
+    util.logParametersToFile(parameters_file, parameter_names, parameter_values)
+    logObject.info("Done saving parameters!")
+
+    lt_to_og = {}
+    og_lts = defaultdict(set)
+    with open(orthofinder_matrix_file) as omf:
+        for i, line in enumerate(omf):
+            line = line.strip('\n')
+            ls = line.split('\t')
+            if i == 0: continue 
+            og = ls[0] 
+            for lts in ls[1:]:
+                for lt in lts.split(', '):
+                    if lt == '': continue
+                    lt_to_og[lt] = og
+                    og_lts[og].add(lt) 
+
+    bgc_ogs = set([])
+    sample_gbks = {}
+    sample_pops = {}
+    og_gcfs = defaultdict(set)
+    og_samples = defaultdict(set)
+    lt_to_gcf = defaultdict(dict)
+    all_pops = set([])
+    all_gcfs = set([])
+    with open(lsabgc_detailed_listing) as oldlf:
+        for i, line in enumerate(oldlf):
+            if i == 0: continue
+            line = line.strip()
+            sample, population, method, genome_path, bgc_id, bgc_path, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+            all_gcfs.add(gcf_id)
+            all_pops.add(population)
+            sample_pops[sample] = population
+            sample_gbks[sample] = genome_path
+            with open(bgc_path) as obp:
+                for rec in SeqIO.parse(obp, 'genbank'):
+                    for feat in rec.features:
+                        if feat.type != 'CDS': continue 
+                        lt = feat.qualifiers.get('locus_tag')[0]
+                        og = lt_to_og[lt]
+                        bgc_ogs.add(og)
+                        og_gcfs[og].add(gcf_id)
+                        og_samples[og].add(sample)
+                        lt_to_gcf[sample][lt] = gcf_id
+
+    bgc_og_protseq_dir = scratchdir + 'BGC_OG_Protein_Seqs/'
+    bgc_og_protalgn_dir = scratchdir + 'BGC_OG_Protein_Alignments/'
+    bgc_og_prottrim_dir = scratchdir + 'BGC_OG_Protein_Alignments_Trimmed/'
+    bgc_og_prottree_dir = scratchdir + 'BGC_OG_Protein_Trees/'
+    bgc_og_tracks_dir = scratchdir + 'BGC_OG_Tracks_for_Visualization/'
+    bgc_og_visuals_dir = outdir + 'BGC_OG_Phylogenetic_Visualizations/'
+    bgc_og_visuals_script_dir = outdir + 'BGC_OG_PhyloViz_Scripts/'
+
+    util.setupReadyDirectory([bgc_og_protseq_dir, bgc_og_protalgn_dir, bgc_og_prottree_dir, bgc_og_tracks_dir, bgc_og_visuals_dir])
+
+    for sample in sample_gbks:
+        sample_gbk = sample_gbks[sample]
+        with open(sample_gbk) as osg:
+            for rec in SeqIO.parse(osg):
+                for feat in rec.features:
+                    lt = feat.qualifiers.get('locus_tag')
+                    og = lt_to_og[lt]
+                    if og in bgc_ogs:
+                        prot_seq = feat.qualifiers.get('translation')[0]
+                        og_prot_faa = bgc_og_protseq_dir + og + '.faa'
+                        opf_handle = open(og_prot_faa, 'a+')
+                        opf_handle.write('>' + sample + '|' + lt + '\n' + prot_seq + '\n')
+                        opf_handle.close()
+                        og_pop = sample_pops[sample]
+                        og_gcf = lt_to_gcf[sample][lt]
+                        og_track_file = bgc_og_tracks_dir + og + '.txt'
+                        otf_handle = open(og_track_file, 'a+')
+                        otf_handle.write(lt + '\t' + og_pop + '\t' + og_gcf + '\n')    
+
+    pop_count = len(all_pops)
+    population_color_file = scratchdir + 'pop_colors.txt'
+    util.generateColors(scratchdir, population_color_file, pop_count, palette='Set1', palette_color_count=9)
+    population_color_mapping_file = scratchdir + 'pop_colors_mapping.txt'
+    util.mapColorsToCategories(all_pops, population_color_file, population_color_mapping_file)
+    population_color_legend_pdf = outdir + 'population_coloring.pdf'
+    plotLegend(population_color_mapping_file, population_color_legend_pdf, logObject)
+
+    gcf_count = len(all_gcfs)
+    gcf_color_file = scratchdir + 'gcf_colors.txt'
+    util.generateColors(scratchdir, gcf_color_file, gcf_count, palette='Pastel1', palette_color_count=9)
+    gcf_color_mapping_file = scratchdir + 'gcf_colors_mapping.txt' 
+    util.mapColorsToCategories(all_gcfs, gcf_color_file, gcf_color_mapping_file)
+    gcf_color_legend_pdf = outdir + 'gcf_coloring.pdf'
+    plotLegend(gcf_color_mapping_file, gcf_color_legend_pdf, logObject)
+
+    muscle_cmds = []
+    trimal_cmds = []
+    fasttree_cmds = []
+    plot_inputs = []
+    for bo in bgc_ogs:
+        og_prot_faa = bgc_og_protseq_dir + bo + '.faa'
+        og_prot_msa = bgc_og_protalgn_dir + bo + '.msa.faa'
+        og_prot_trim = bgc_og_prottrim_dir + bo + '.msa.trimmed.faa'
+        og_prot_tre = bgc_og_prottree_dir + bo + '.tre'
+        og_track_file = bgc_og_tracks_dir + bo + '.txt'
+        og_rscript_file = bgc_og_visuals_script_dir + bo + '.R'
+        og_pdf_file = bgc_og_visuals_dir + bo + '.pdf'
+
+        muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
+        if high_qual_flag:
+             muscle_cmd = ['muscle', '-align', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
+        trimal_cmd = ['trimal', '-in', og_prot_msa, '-out', og_prot_trim, '-strict']
+        fasttree_cmd = ['fasttree', og_prot_trim, '>', og_prot_tre]
+        plot_input = [og_prot_tre, og_track_file, og_rscript_file, og_pdf_file]
+        muscle_cmds.append(muscle_cmd)
+        trimal_cmds.append(trimal_cmd)
+        fasttree_cmds.append(fasttree_cmd)
+        plot_inputs.append(plot_input)
+
+    try:
+        p = multiprocessing.Pool(parallel_jobs_4thread)
+        p.map(util.multiProcessNoLog, muscle_cmds)
+        p.close()
+    except Exception as e:
+        msg = 'Issues running muscle in parallel!\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    try:
+        p = multiprocessing.Pool(threads)
+        p.map(util.multiProcessNoLog, trimal_cmds)
+        p.close()
+    except Exception as e:
+        msg = 'Issues running trimal in parallel.\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    try:
+        p = multiprocessing.Pool(threads)
+        p.map(util.multiProcessNoLog, fasttree_cmds)
+        p.close()
+    except Exception as e:
+        msg = 'Issues running fasttree in parallel.\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    try:
+        p = multiprocessing.Pool(threads)
+        p.map(runPlotting, plot_inputs)
+        p.close()
+    except Exception as e:
+        msg = 'Issues creating plots.\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    final_tsv_file = outdir + 'Orthogroup_Overview.txt'
+    ftf_handle = open(final_tsv_file, 'w')
+    ftf_handle.write('\t'.join(['orthogroup', 'GCFs', 'populations', 'conservation', 'norm_max_bd', 'mean_bd', 'max_bd'] + [pop + '_conservation' for pop in sorted(all_pops)]) + '\n')
+    
+    st_pds = util.pairwiseDistancesFromTree(species_tree_file, logObject)
+
+    for bo in bgc_ogs:
+        og_prot_tre = bgc_og_prottree_dir + bo + '.tre'
+        gt_pds = util.pairwiseDistancesFromTree(og_prot_tre, logObject)
+        pass
+    ftf_handle.close()
+
+    # Write checkpoint file 
+    checkpoint_file = outdir + 'CHECKPOINT.txt'
+    checkpoint_handle = open(checkpoint_file, 'w')
+    checkpoint_handle.write('lsaBGC-Reconcile completed successfully!')
+    checkpoint_handle.close()
+
+    # Close logging object and exit
+    util.closeLoggerObject(logObject)
+    sys.exit(0)
+
+def plotLegend(color_file, color_legend_pdf, scratchdir, logObject):
+    try:
+        legend_script = scratchdir + 'legend_rscript.R'
+        gs_handle = open(legend_script, 'w')
+
+        gs_handle.write('library(ggplot2)\n')
+        gs_handle.write('library(grid)\n')
+        gs_handle.write('library(gridExtra)\n\n')
+
+        gs_handle.write('dat <- read.table("' + color_file + '", sep="\\t", header=F)\n')
+        gs_handle.write('gcf_colors <- c(dat$V2)\n')
+        gs_handle.write('names(gcf_colors) <- c(heatmap.data.select$annotation)\n\n')
+
+        gs_handle.write('png("' + color_legend_pdf + '", height=10, width=5, units="in", res=300)\n')
+        gs_handle.write('my_hist <- ggplot(heatmap.data, aes(x=annotation, y=1, fill = annotation)) + geom_bar(stat="identity") + scale_fill_manual(values=gcf_colors)\n')
+        gs_handle.write('legend <- cowplot::get_legend(my_hist)\n')
+        gs_handle.write('grid.newpage()\n')
+        gs_handle.write('grid.draw(legend)\n')
+        gs_handle.write('dev.off()\n\n')
+
+        gs_handle.close()
+		
+        rscript_cmd = ['Rscript', legend_script]
+        util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[png_file, legend_png_file])
+    except:
+        msg = 'Issues running image creation (which is primarily based on the R library ggtree)'
+        sys.stderr.write(msg + '\n')   
+        logObject.error(msg)
+        sys.exit(1)
+
+def runPlotting(workspace, phylo_file, heatmap_file, png_file, legend_png_file, logObject):
+	try:
+		gseef_script = workspace + 'gseef_rscript.R'
+		gs_handle = open(gseef_script, 'w')
+
+		gs_handle.write('library(ggplot2)\n')
+		gs_handle.write('library(ggtree)\n')
+		gs_handle.write('library(gggenes)\n')
+		gs_handle.write('library(ape)\n')
+		gs_handle.write('library(phytools)\n')
+		gs_handle.write('library(aplot)\n')
+		gs_handle.write('library(dplyr)\n')
+		gs_handle.write('library(grid)\n')
+		gs_handle.write('library(gridExtra)\n\n')
+
+		gs_handle.write('phylo.tree <- read.tree("' + phylo_file + '")\n')
+		gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
+
+		gs_handle.write('heatmap.data <- read.table("' + heatmap_file + '", header=T, sep="\\t")\n')
+		gs_handle.write('heatmap.data.filt <- heatmap.data[heatmap.data$annotation != "absent",]\n')
+		gs_handle.write('heatmap.data.select <- distinct(heatmap.data.filt[c("annotation", "colors")])\n')
+		gs_handle.write('gcf_colors <- c(heatmap.data.select$colors)\n')
+		gs_handle.write('names(gcf_colors) <- c(heatmap.data.select$annotation)\n\n')
+
+		gs_handle.write('png("' + png_file + '", height=10, width=20, units="in", res=300)\n')
+		gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')
+		gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = reorder(gcf, gcf_index), y = label, fill = annotation)) +\n') 
+		gs_handle.write('theme_classic() + scale_fill_manual(values=gcf_colors, na.value="white") +\n')
+		gs_handle.write('xlab("GCF IDs") + ylab("") + geom_tile(color="white", show.legend=F) +\n')
+		gs_handle.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
+		gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
+		gs_handle.write('dev.off()\n\n')
+
+		gs_handle.write('png("' + legend_png_file + '", height=10, width=5, units="in", res=300)\n')
+		gs_handle.write('my_hist <- ggplot(heatmap.data, aes(x=annotation, y=1, fill = annotation)) + geom_bar(stat="identity") + scale_fill_manual(values=gcf_colors)\n')
+		gs_handle.write('legend <- cowplot::get_legend(my_hist)\n')
+		gs_handle.write('grid.newpage()\n')
+		gs_handle.write('grid.draw(legend)\n')
+		gs_handle.write('dev.off()\n\n')
+
+		gs_handle.close()
+		
+		rscript_cmd = ['Rscript', gseef_script]
+		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[png_file, legend_png_file])
+	except:
+		msg = 'Issues running image creation (which is primarily based on the R library ggtree)'
+		sys.stderr.write(msg + '\n')
+		logObject.error(msg)
+		sys.exit(1)
+
+if __name__ == '__main__':
+    lsaBGC_Reconcile()
