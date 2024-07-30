@@ -21,6 +21,7 @@ import pathlib
 import warnings
 warnings.simplefilter('ignore')
 import pkg_resources  # part of setuptools
+import pandas as pd 
 
 version = pkg_resources.require("lsaBGC-Pan")[0].version
 
@@ -80,6 +81,7 @@ def determineNonRepBGCs(sample, gcf, sample_gcf_bgcs, gcf_bgcs, bgc_pairwise_rel
 					nonrep_bgcs.add(sample_bgc)
 
 		elif len(complete_bgcs) == 0:
+			sample_bgc_scores = []
 			for sample_bgc in sample_gcf_bgcs:
 				sample_bgc_relation_to_gcf_bgcs = 0.0
 				for bgc in gcf_bgcs:
@@ -107,7 +109,7 @@ def runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matr
 			for i, line in enumerate(odbl):
 				if i == 0: continue
 				line = line.strip()
-				sample, population, method, genome_path, bgc_id, bgc_path, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+				sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
 				gcfs.add(gcf_id)
 
 		lsabgc_map_cmds = []
@@ -142,7 +144,7 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 			for i, line in enumerate(odbl):
 				if i == 0: continue
 				line = line.strip()
-				sample, population, method, genome_path, bgc_id, bgc_path, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+				sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
 				gcfs.add(gcf_id)
 
 		lsabgc_see_and_csi_cmds = []
@@ -185,7 +187,7 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 			for i, line in enumerate(odbl):
 				if i == 0: continue
 				line = line.strip()
-				sample, population, method, genome_path, bgc_id, bgc_path, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+				sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
 				gcf_sample_bgcs[gcf_id][sample].append(bgc_path)
 				if float(dist_to_edge) <= zol_edge_distance:
 					edgy_bgcs.add(bgc_path)
@@ -279,7 +281,7 @@ def mapColorsToCategories(categories_set, colors_file, colors_mapping_file):
 		cmf_handle = open(colors_mapping_file, 'w')
 		cmf_handle.write('category\tcolor\n')
 		for i, cat in enumerate(sorted(categories_set)):
-			cmf_handle.write(cat + '\t ' + colors[i] + '\n')
+			cmf_handle.write(cat + '\t"' + colors[i] + '"\n')
 		cmf_handle.close()
 	
 	except:
@@ -287,16 +289,20 @@ def mapColorsToCategories(categories_set, colors_file, colors_mapping_file):
 		sys.stderr.write(msg + '\n')
 		sys.stderr.write(traceback.format_exc() + '\n')
 		sys.exit(1)
-def pairwiseDistancesFromTree(tree_file, logObject):
-	try:
-		t = Tree(tree_file)
 
+def pairwiseDistancesFromTree(tree_file, logObject):
+	pairwise_distances = defaultdict(lambda: defaultdict(lambda: None))
+	try:
+		try:
+			t = Tree(tree_file)
+		except:
+			return(pairwise_distances)
+		
 		leaves = set([])
 		for node in t.traverse('postorder'):
 			if node.is_leaf():
 				leaves.add(node.name)
 
-		pairwise_distances = defaultdict(lambda: defaultdict(lambda: None))
 		for i, l1 in enumerate(sorted(leaves)):
 			for j, l2 in enumerate(sorted(leaves)):
 				if i == j:
@@ -305,6 +311,7 @@ def pairwiseDistancesFromTree(tree_file, logObject):
 					dist = t.get_distance(l1, l2)
 					pairwise_distances[l1][l2] = dist
 					pairwise_distances[l2][l1] = dist
+		
 		return(pairwise_distances)
 	except:	
 		msg = 'Issue with calculating pairwise distances between leaves in the tree file: %s' % tree_file
@@ -395,6 +402,47 @@ def cleanUpSampleName(original_name):
 		':', '_').replace('|', '_').replace('"', '_').replace("'", '_').replace("=", "_").replace('-', '_').replace('(',
 																													'').replace(
 		')', '').replace('/', '').replace('\\', '').replace('[', '').replace(']', '').replace(',', '')
+
+def parseGECCOGBKForFunction(bgc_gbk, logObject):
+	try:
+		rec = SeqIO.read(bgc_gbk, 'genbank')
+		product = 'unknown'
+		try:
+			product = rec.annotations['structured_comment']['GECCO-Data']['biosyn_class']
+		except:
+			try:
+				product = rec.annotations['structured_comment']['GECCO-Data']['cluster_type']
+			except:
+				pass
+		if product == 'Unknown':
+			product = 'unknown'
+		return(product)
+	except:
+		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
+		raise RuntimeError()
+
+def parseAntiSMASHGBKForFunction(bgc_gbk, logObject):
+	product = 'unknown'
+	try:
+		products = set([])
+		with open(bgc_gbk) as obg:
+			for rec in SeqIO.parse(obg, 'genbank'):
+				for feat in rec.features:
+					if feat.type == 'protocluster':
+						try:
+							products.add(feat.qualifiers.get('product')[0])
+						except:
+							pass
+		if len(products) == 1:
+			product = list(products)[0]
+		elif len(products) == 2 and 'NRPS-like' in products and 'NRPS' in products:
+				product = 'NRPS'
+		elif len(products) >= 2:
+			product = 'multi-type'
+	except:
+		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
+		raise RuntimeError()
+	return(product)
 
 def parseOrthoFinderMatrix(orthofinder_matrix_file, relevant_gene_lts, all_primary=False):
 	"""
@@ -506,7 +554,7 @@ def addLocusTagsToGBKs(inputs):
 					# first try setting locus tag to just protein_id
 					if keep_ids_flag:
 						try:
-							cds_lt = feat.qualifers.get('locus_tag')[0]
+							cds_lt = feat.qualifiers.get('locus_tag')[0]
 						except:
 							try:
 								cds_lt = feat.qualifiers.get('protein_id')[0]
@@ -654,7 +702,7 @@ def processAntiSMAHSBGCtoGenomeMappingResults(process_data, logObject):
 					line = line.strip()
 					scaff, start_coord, end_coord, dist_to_edge = line.split('\t')
 					bgc_length = int(end_coord) - int(start_coord) + 1
-					loc_list = [sample, scaff, start_coord, end_coord, bgc_length, dist_to_edge, 'antismash']
+					loc_list = [sample, scaff, int(start_coord), int(end_coord), bgc_length, int(dist_to_edge), 'antismash']
 					loc_lists[bgc_file].append(loc_list)
 
 		bgc_locations = []
@@ -886,17 +934,15 @@ def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, run_msa, logOb
 		
 		result_handle = open(result_file, 'w')
 
-		genome_to_index = {}
 		hog_ids = set([])
 		hog_prots = set([])
+		genomes = []
 		with open(n0_file) as n0f:
 			for i, line in enumerate(n0f):
 				line = line.strip('\n')
 				ls = line.split('\t')
 				if i == 0:
 					genomes = ls[3:]
-					for j, genome in enumerate(genomes):
-						genome_to_index[genome] = j
 					result_handle.write('Orthogroup\t' + '\t'.join(genomes) + '\n')
 				else:
 					hog = ls[0].split('N0.')[1]
@@ -909,6 +955,7 @@ def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, run_msa, logOb
 
 		hog_id_iter = max(hog_ids) + 1
 		for prot_file in os.listdir(prot_directory):
+			if not os.path.isfile(prot_file) or not prot_file.endswith('.faa'): continue
 			genome_id = '.faa'.join(prot_file.split('.faa')[:-1])
 			with open(prot_directory + prot_file) as opf:
 				for rec in SeqIO.parse(opf, 'fasta'):
@@ -928,8 +975,8 @@ def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, run_msa, logOb
 							hog_id_iter_str += str(hog_id_iter)
 						printlist = ['HOG' + hog_id_iter_str]
 						hog_id_iter += 1
-						for gi in range(0, len(genome_to_index)):
-							if genome_to_index[gi] == genome:
+						for genome_iter in genomes:
+							if genome_id == genome_iter:
 								printlist.append(rec.id)
 							else:
 								printlist.append('')
@@ -977,7 +1024,8 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 	try:
 		sample_genomes = {}
 		with open(detailed_BGC_listing_file) as odlf:
-			for line in odlf:
+			for i, line in enumerate(odlf):
+				if i == 0: continue
 				line = line.strip()
 				sample, _, genome_gbk = line.split('\t')[:3]
 				sample_genomes[sample] = genome_gbk
@@ -1017,15 +1065,42 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 		main_ortho_file = results_directory + 'gene_presence_absence.csv'
 		
 		result_handle = open(result_file, 'w')
+		clustered_lts = set([])
+		cds_iter = 1
+		genomes = []
 		with open(main_ortho_file) as omof:
 			for i, line in enumerate(omof):
-				line = line.strip()
+				line = line.strip('\n')
 				ls = line.split(',')
 				if i == 0: 
 					result_handle.write('\t'.join(['OrthoGroup'] + ls[3:]) + '\n')
+					genomes = ls[3:]
 				else:
-					og_id = 'OG' + determineAsofName(i)
+					og_id = 'OG' + determineAsofName(cds_iter)
+					for lts in ls[3:]:
+						for lt in lts.split(';'):
+							if lt.strip() != '':
+								clustered_lts.add(lt)
 					result_handle.write('\t'.join([og_id] + [', '.join(x.split(';')) for x in ls[3:]]) + '\n')
+					cds_iter += 1
+		
+		for sample in sample_genomes:
+			gbk = sample_genomes[sample]
+			with open(gbk) as ogbk:
+				for rec in SeqIO.parse(ogbk, 'genbank'):
+					for feat in rec.features:
+						if not feat.type == 'CDS': continue
+						lt = feat.qualifiers.get('locus_tag')[0]
+						if not lt in clustered_lts:
+							og_id = 'OG' + determineAsofName(cds_iter)
+							cds_iter += 1
+							printlist = [og_id]
+							for genome in genomes:
+								if genome == sample:
+									printlist.append(lt)
+								else:
+									printlist.append('')
+							result_handle.write('\t'.join(printlist) + '\n')
 		result_handle.close()
 
 		assert (os.path.isfile(result_file))
@@ -1034,6 +1109,8 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 		logObject.error(msg)
 		logObject.error(traceback.format_exc())
 		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
 
 	return result_file
 
@@ -1222,189 +1299,328 @@ def logParametersToObject(logObject, parameter_names, parameter_values):
 		logObject.info(pn + ': ' + str(pv))
 
 
-# TODO: refactor the following functions for lsaBGC-Pan 
-numeric_columns = set(['GCF Count', 'hg order index', 'hg consensus direction', 'median gene length',
-					   'proportion of samples with hg', 'proportion of total populations with hg',
-					   'hg median copy count', 'num of hg instances', 'samples with hg', 'ambiguous sites proporition',
-					   'Tajimas D', 'proportion variable sites', 'proportion nondominant major allele',
-					   'median beta rd',
-					   'median dn ds', 'mad dn ds', 'populations with hg', 'proportion of total populations with hg',
-					   'most significant Fisher exact pvalues presence absence', 'median Tajimas D per population',
-					   'mad Tajimas D per population'])
+def determineSeqSimProteinAlignment(protein_alignment_file, use_only_core=True):
+	protein_sequences = {}
+	with open(protein_alignment_file) as ocaf:
+		for rec in SeqIO.parse(ocaf, 'fasta'):
+			protein_sequences[rec.id] = str(rec.seq).upper()
 
+	pair_seq_matching = defaultdict(lambda: defaultdict(lambda: 0.0))
+	for i, g1 in enumerate(sorted(protein_sequences)):
+		s1 = g1.split('|')[0]
+		g1s = protein_sequences[g1]
+		for j, g2 in enumerate(sorted(protein_sequences)):
+			if i >= j: continue
+			s2 = g2.split('|')[0]
+			if s1 == s2: continue
+			g2s = protein_sequences[g2]
+			tot_comp_pos = 0
+			match_pos = 0
+			for pos, g1a in enumerate(g1s):
+				g2a = g2s[pos]
+				if g1a != '-' or g2a != '-':
+					if not use_only_core or (use_only_core and g1a != '-' and g2a != '-'):
+						tot_comp_pos += 1
+						if g1a == g2a:
+							match_pos += 1
+			general_matching_percentage = 0.0
+			if tot_comp_pos > 0:
+				general_matching_percentage = float(match_pos) / float(tot_comp_pos)
+			if pair_seq_matching[s1][s2] < general_matching_percentage and pair_seq_matching[s2][
+				s1] < general_matching_percentage:
+				pair_seq_matching[s1][s2] = general_matching_percentage
+				pair_seq_matching[s2][s1] = general_matching_percentage
 
-def loadSampleToGCFIntoPandaDataFrame(gcf_listing_dir):
-	import pandas as pd
-	panda_df = None
+	return pair_seq_matching
+
+def castToNumeric(x):
+	"""
+	Description:
+	This function attempts to cast a variable into a float. A special exception is whether "< 3 segregating sites!" is
+	the value of the variable, which will simply be retained as a string.
+	********************************************************************************************************************
+	Parameters:
+	- x: Input variable.
+	********************************************************************************************************************
+	Returns:
+	- A float casting of the variable's value if numeric or "nan" if not.
+	********************************************************************************************************************
+	"""
 	try:
-		data = []
-		data.append(['GCF', 'Sample', 'BGC Instances'])
-		for f in os.listdir(gcf_listing_dir):
-			gcf = f.split('.txt')[0]
-			sample_counts = defaultdict(int)
-			with open(gcf_listing_dir + f) as ogldf:
-				for line in ogldf:
-					line = line.strip()
-					sample, bgc_path = line.split('\t')
-					sample_counts[sample] += 1
-			for s in sample_counts:
-				data.append([gcf, s, sample_counts[s]])
-
-		panda_dict = {}
-		for ls in zip(*data):
-			key = ' '.join(ls[0].split('_'))
-			vals = ls[1:]
-			panda_dict[key] = vals
-		panda_df = pd.DataFrame(panda_dict)
-
-	except Exception as e:
-		raise RuntimeError(traceback.format_exc())
-	return panda_df
-
-
-def loadSamplesIntoPandaDataFrame(sample_annot_file, pop_spec_file=None):
-	import pandas as pd
-	panda_df = None
-	try:
-		if pop_spec_file != None:
-			sample_pops = {}
-			with open(pop_spec_file) as opsf:
-				for line in opsf:
-					line = line.strip()
-					ls = line.split('\t')
-					sample_pops[ls[0]] = ls[1]
-
-		data = []
-		if pop_spec_file != None:
-			data.append(['Sample', 'Population/Clade'])
+		if x == '< 3 segregating sites!':
+			return(x)
 		else:
-			data.append(['Sample'])
-		with open(sample_annot_file) as saf:
-			for line in saf:
-				line = line.strip('\n')
-				ls = line.split('\t')
-				if pop_spec_file != None:
-					pop = sample_pops[ls[0]]
-					data.append([ls[0], pop])
-				else:
-					data.append([ls[0]])
+			x = float(x)
+			return (x)
+	except:
+		return float('nan')
 
-		panda_dict = {}
-		for ls in zip(*data):
-			key = ' '.join(ls[0].split('_'))
-			vals = ls[1:]
-			panda_dict[key] = vals
-		panda_df = pd.DataFrame(panda_dict)
-
-	except Exception as e:
-		raise RuntimeError(traceback.format_exc())
-	return panda_df
-
-
-def loadTableInPandaDataFrame(input_file, mibig_info=None):
+def loadTableInPandaDataFrame(input_file, numeric_columns):
+	"""
+	Description:
+	This function formats reads a TSV file and stores it as a pandas dataframe.
+	********************************************************************************************************************
+	Parameters:
+	- input_file: The input TSV file, with first row corresponding to the header.
+	- numeric_columns: Set of column names which should have numeric data.
+	********************************************************************************************************************
+	Returns:
+	- panda_df: A pandas DataFrame object reprsentation of the input TSV file.
+	********************************************************************************************************************
+	"""
 	import pandas as pd
 	panda_df = None
 	try:
 		data = []
-		mibig_col = []
 		with open(input_file) as oif:
-			for i, line in enumerate(oif):
+			for line in oif:
 				line = line.strip('\n')
 				ls = line.split('\t')
 				data.append(ls)
-				gcf = ls[0]
-				hg = ls[2]
-				key = gcf + '|' + hg
-				if mibig_info != None and i > 0:
-					if len(mibig_info[key]) > 0:
-						mibig_col.append('; '.join(sorted(mibig_info[key])))
-					else:
-						mibig_col.append('NA')
 
 		panda_dict = {}
 		for ls in zip(*data):
-			key = ' '.join(ls[0].split('_'))
+			key = ls[0]
 			cast_vals = ls[1:]
 			if key in numeric_columns:
 				cast_vals = []
 				for val in ls[1:]:
 					cast_vals.append(castToNumeric(val))
 			panda_dict[key] = cast_vals
-			if key == 'annotation' and mibig_info != None and len(mibig_info) > 0:
-				panda_dict['MIBiG mapping'] = mibig_col
 		panda_df = pd.DataFrame(panda_dict)
 
 	except Exception as e:
-		raise RuntimeError(traceback.format_exc())
+		sys.stderr.write(traceback.format_exc())
+		sys.exit(1)
 	return panda_df
 
-
-def loadCustomPopGeneTableInPandaDataFrame(input_file, mibig_info=None):
-	import pandas as pd
-	panda_df = None
+def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_results_dir, zol_high_qual_flag,
+							     mibig_dir, recon_result_file, recon_og_result_file, recon_pop_color_file,
+								 sociate_result_file, final_spreadsheet_xlsx, scratch_dir, logObject):
 	try:
-		ignore_data_cats = {'hg_median_copy_count', 'proportion_of_total_populations_with_hg',
-							'proportion_variable_sites', 'proportion_nondominant_major_allele', 'median_dn_ds',
-							'mad_dn_ds', 'all_domains', 'most_significant_Fisher_exact_pvalues_presence_absence',
-							'median_Tajimas_D_per_population', 'mad_Tajimas_D_per_population',
-							'most_negative_population_Tajimas_D', 'most_positive_population_Tajimas_D',
-							'population_entropy', 'median_fst_like_estimate'}
-		data = []
-		mibig_col = []
-		with open(input_file) as oif:
-			for i, line in enumerate(oif):
-				line = line.strip('\n')
-				ls = line.split('\t')
-				gcf = ls[0]
-				hg = ls[2]
-				key = gcf + '|' + hg
-				if mibig_info != None and i > 0:
-					if len(mibig_info[key]) > 0:
-						mibig_col.append('; '.join(sorted(mibig_info[key])))
-					else:
-						mibig_col.append('NA')
-				data.append(ls)
+		# generate Excel spreadsheet
+		writer = pd.ExcelWriter(final_spreadsheet_xlsx, engine='xlsxwriter')
+		workbook = writer.book
 
-		panda_dict = {}
-		for ls in zip(*data):
-			if ls[0] in ignore_data_cats: continue
-			if ls[0] == 'gcf_annotation':
-				updated_ans = []
-				for ans in ls[1:]:
-					upans = []
-					for an in ans.split('; '):
-						if not an.startswith('NA:'):
-							upans.append(an)
-					updated_ans.append('|'.join(upans))
-				panda_dict[' '.join(ls[0].split('_'))] = updated_ans
-			elif ls[0] == 'annotation':
-				key = ' '.join(ls[0].split('_'))
-				cleaned_annots = []
-				for val in ls[1:]:
-					ca = []
-					for a in val.split('; '):
-						if a != 'hypothetical protein':
-							ca.append(a)
-					if len(ca) == 0:
-						cleaned_annots.append('hypothetical protein')
-					else:
-						cleaned_annots.append('; '.join(ca))
-				panda_dict[key] = cleaned_annots
-				if mibig_info != None and len(mibig_info) > 0:
-					panda_dict['MIBiG mapping'] = mibig_col
-			else:
-				key = ' '.join(ls[0].split('_'))
-				cast_vals = ls[1:]
-				if key in numeric_columns:
+		er_sheet = workbook.add_worksheet('Explanation of Results')
+		er_sheet.write(0, 0, 'An explanation on the interpretation of the different sheets in this spreadsheet can be found online at:')
+		er_sheet.write(1, 0, 'https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/5.-explanation-of-final-spreadsheet-and-visual-reports')
 
-					cast_vals = []
-					for val in ls[1:]:
-						cast_vals.append(castToNumeric(val))
-				panda_dict[key] = cast_vals
-		panda_df = pd.DataFrame(panda_dict)
+		# specify different types of cell formatting 
 
-	except Exception as e:
-		raise RuntimeError(traceback.format_exc())
-	return panda_df
+		warn_format = workbook.add_format({'bg_color': '#bf241f', 'bold': True, 'font_color': '#FFFFFF'})
+		na_format = workbook.add_format({'font_color': '#a6a6a6', 'bg_color': '#FFFFFF', 'italic': True})
+		header_format = workbook.add_format({'bold': True, 'text_wrap': True, 'valign': 'top', 'fg_color': '#D7E4BC', 'border': 1})
+
+		# create detailed BGC info sheet
+		
+		bo_numeric_columns = set(['start', 'end', 'bgc_length', 'dist_to_edge'])
+		bo_data = loadTableInPandaDataFrame(detailed_BGC_listing_with_Pop_and_GCF_map_file, bo_numeric_columns)
+		bo_data.to_excel(writer, sheet_name='BGC Overview', index=False, na_rep="NA")
+		bo_sheet =  writer.sheets['BGC Overview']
+		bo_sheet.conditional_format('A1:BA1', {'type': 'cell', 'criteria': '!=', 'value': 'NA', 'format': header_format})
+
+		# create zol results spreadsheet
+
+		zol_combined_tsv_file = scratch_dir + 'zol_results.tsv'
+
+		zol_sheet_header = ['GCF ID', 'Ortholog Group (OG) ID', 'OG is Single Copy?', 'Proportion of Total Gene Cluster Instances with OG', 
+					        'Proprtion of Complete Gene Cluster Instances with OG', 'OG Median Length (bp)', 'OG Consensus Order', 
+							'OG Consensus Direction', 'Tajima\'s D', 'Proportion of Filtered Codon Alignment is Segregating Sites', 
+							'Entropy', 'Upstream Region Entropy', 'Median Beta-RD-gc', 'Max Beta-RD-gc', 
+							'Proportion of sites which are highly ambiguous in codon alignment', 
+							'Proportion of sites which are highly ambiguous in trimmed codon alignment', 'Median GC', 'Median GC Skew']
+
+		if zol_high_qual_flag:
+			zol_sheet_header += ['GARD Partitions Based on Recombination Breakpoints',
+			           'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
+				       'Average delta(Beta, Alpha) by FUBAR across sites',
+				       'Proportion of Sites Under Selection which are Positive'] 
+					
+		zol_sheet_header += ['KO Annotation (E-value)', 'PGAP Annotation (E-value)', 'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)',
+							'IS Finder (E-value)', 'MIBiG Annotation (E-value)', 'VOG Annotation (E-value)', 'VFDB Annotation (E-value)', 
+							'Pfam Domains', 'CDS Locus Tags', 'OG Consensus Sequence']
+		
+		# ^ basically added two columns (GCF id and complete instances conservation) and took away one (custom db annotation)
+
+		zol_full_dir = zol_results_dir + 'Comprehensive/'
+		zol_comp_dir = zol_results_dir + 'Complete_Instances/'	
+
+		comp_cons = defaultdict(lambda: defaultdict(lambda: 'NA'))
+		for gcf in os.listdir(zol_comp_dir):
+			gcf_result_file = zol_comp_dir + gcf + '/Final_Results/Consolidated_Report.tsv'
+			if not os.path.isfile(gcf_result_file): continue			
+			with open(gcf_result_file) as ogrf:
+				for i, line in enumerate(ogrf):
+					if i == 0: continue
+					line = line.strip()
+					ls = line.split('\t')
+					og = ls[0]
+					cons = ls[2]
+					comp_cons[gcf][og] = cons
+
+		zctf_handle = open(zol_combined_tsv_file, 'w')
+		zctf_handle.write('\t'.join(zol_sheet_header) + '\n')
+		num_rows = 1
+		for gcf in os.listdir(zol_full_dir):
+			gcf_result_file = zol_full_dir + gcf + '/Final_Results/Consolidated_Report.tsv'
+			if not os.path.isfile(gcf_result_file): continue
+			with open(gcf_result_file) as ogrf:
+				for i, line in enumerate(ogrf):
+					if i == 0: continue
+					line = line.strip()
+					ls = line.split('\t')
+					row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:16] + ls[17:]
+					if zol_high_qual_flag:
+						row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:20] + ls[21:]
+					zctf_handle.write('\t'.join(row) + '\n')
+					num_rows += 1
+		zctf_handle.close()
+
+		zr_numeric_columns = set(['Proportion of Total Gene Cluster Instances with OG', 'Proprtion of Complete Gene Cluster Instances with OG', 
+							      'OG Median Length (bp)', 'OG Consensus Order', 'Tajima\'s D', 'GARD Partitions Based on Recombination Breakpoints',
+			           			  'Number of Sites Identified as Under Positive or Negative Selection by FUBAR', 'Average delta(Beta, Alpha) by FUBAR across sites',
+				     		      'Proportion of Sites Under Selection which are Positive', 'Proportion of Filtered Codon Alignment is Segregating Sites',
+								  'Entropy', 'Upstream Region Entropy', 'Median Beta-RD-gc', 'Max Beta-RD-gc', 'Proportion of sites which are highly ambiguous in codon alignment', 
+								  'Proportion of sites which are highly ambiguous in trimmed codon alignment', 'Median GC', 'Median GC Skew'])
+		
+		zr_data = loadTableInPandaDataFrame(zol_combined_tsv_file, zr_numeric_columns)
+		zr_data.to_excel(writer, sheet_name='zol Results', index=False, na_rep="NA")
+		zr_sheet =  writer.sheets['zol Results']
+
+		zr_sheet.conditional_format('C2:C' + str(num_rows), {'type': 'cell', 'criteria': '==', 'value': '"False"', 'format': warn_format})
+		zr_sheet.conditional_format('A2:CA' + str(num_rows), {'type': 'cell', 'criteria': '==', 'value': '"NA"', 'format': na_format})
+		zr_sheet.conditional_format('A1:CA1', {'type': 'cell', 'criteria': '!=', 'value': 'NA', 'format': header_format})
+
+		# prop gene-clusters with hg
+		zr_sheet.conditional_format('D2:D' + str(num_rows), {'type': '2_color_scale', 'min_color': "#f7de99", 'max_color': "#c29006", "min_value": 0.0, "max_value": 1.0, 'min_type': 'num', 'max_type': 'num'})
+		zr_sheet.conditional_format('E2:E' + str(num_rows), {'type': '2_color_scale', 'min_color': "#f7de99", 'max_color': "#c29006", "min_value": 0.0, "max_value": 1.0, 'min_type': 'num', 'max_type': 'num'})
+
+		# gene-lengths
+		zr_sheet.conditional_format('F2:F' + str(num_rows), {'type': '2_color_scale', 'min_color': "#a3dee3", 'max_color': "#1ebcc9", "min_value": 100, "max_value": 2500, 'min_type': 'num', 'max_type': 'num'})
+		
+		# taj-d
+		zr_sheet.conditional_format('I2:I' + str(num_rows),
+										{'type': '3_color_scale', 'min_color': "#f7a09c", "mid_color": "#e0e0e0",'min_type': 'num', 'max_type': 'num', 'mid_type': 'num',
+										'max_color': "#87cefa", "min_value": -2.0, "mid_value": 0.0, "max_value": 2.0})
+
+		# prop seg sites
+		zr_sheet.conditional_format('J2:J' + str(num_rows),
+										{'type': '2_color_scale', 'min_color': "#eab3f2", 'min_type': 'num', 'max_type': 'num',
+										'max_color': "#a37ba8", "min_value": 0.0, "max_value": 1.0})
+
+		# entropy
+		zr_sheet.conditional_format('K2:K' + str(num_rows),
+										{'type': '2_color_scale', 'min_color': "#f7a8bc", 'min_type': 'num', 'max_type': 'num',
+										'max_color': "#fa6188", "min_value": 0.0, "max_value": 1.0})
+
+		# upstream region entropy
+		zr_sheet.conditional_format('L2:L' + str(num_rows),
+										{'type': '2_color_scale', 'min_color': "#f7a8bc", 'min_type': 'num', 'max_type': 'num',
+										'max_color': "#fa6188", "min_value": 0.0, "max_value": 1.0})
+
+		# median beta-rd gc
+		zr_sheet.conditional_format('M2:M' + str(num_rows),
+										{'type': '3_color_scale', 'min_color': "#fac087", "mid_color": "#e0e0e0",'min_type': 'num', 'max_type': 'num', 'mid_type': 'num',
+										'max_color': "#9eb888", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25})
+		# max beta-rd gc
+		zr_sheet.conditional_format('N2:N' + str(num_rows),
+										{'type': '3_color_scale', 'min_color': "#fac087", "mid_color": "#e0e0e0",'min_type': 'num', 'max_type': 'num', 'mid_type': 'num',
+										'max_color': "#9eb888", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25})
+
+		# ambiguity full ca
+		zr_sheet.conditional_format('O2:O' + str(num_rows),
+										{'type': '2_color_scale', 'min_color': "#ed8c8c", 'min_type': 'num', 'max_type': 'num',
+										'max_color': "#ab1616", "min_value": 0.0, "max_value": 1.0})
+
+		# ambiguity trim ca
+		zr_sheet.conditional_format('P2:P' + str(num_rows),
+										{'type': '2_color_scale', 'min_color': "#ed8c8c", 'min_type': 'num', 'max_type': 'num',
+										'max_color': "#ab1616", "min_value": 0.0, "max_value": 1.0})
+
+		# GC
+		zr_sheet.conditional_format('Q2:Q' + str(num_rows),
+										{'type': '2_color_scale', 'min_color': "#abffb7", 'min_type': 'num', 'max_type': 'num',
+										'max_color': "#43bf55", "min_value": 0.0, "max_value": 1.0})
+
+		# GC Skew
+		zr_sheet.conditional_format('R2:R' + str(num_rows),
+										{'type': '2_color_scale', 'min_color': "#c7afb4", 'min_type': 'num', 'max_type': 'num',
+										'max_color': "#965663", "min_value": -2.0, "max_value": 2.0})
 
 
+		# create MIBiG mapping spreadsheet
+
+		mb_combined_tsv_file = scratch_dir + 'mibig_map_results.tsv'
+		mb_header = ['GCF ID', 'MIBiG BGC ID', 'GCF OG ID', 'MIBiG Protein Matching']
+		mb_outf = open(mb_combined_tsv_file, 'w')
+		mb_outf.write('\t'.join(mb_header) + '\n')
+		for gcf in os.listdir(mibig_dir):
+			map_file = mibig_dir + gcf + '/GCF_to_MIBiG_Relations.txt'
+			if not os.path.isfile(map_file): continue
+			with open(map_file) as omf:
+				for i, line in enumerate(omf):
+					if i == 0: continue
+					mb_outf.write(line)
+		mb_outf.close()
+
+		mb_data = loadTableInPandaDataFrame(mb_combined_tsv_file, set([]))
+		mb_data.to_excel(writer, sheet_name='lsaBGC-MIBiGMapper Results', index=False, na_rep="NA")
+		mb_sheet =  writer.sheets['lsaBGC-MIBiGMapper Results']
+		mb_sheet.conditional_format('A1:CA1', {'type': 'cell', 'criteria': '!=', 'value': 'NA', 'format': header_format})
+
+		# create reconcile spreadsheet
+
+		rs_numeric_columns = set([])
+		rs_non_numeric_columns = set(['orthogroup', 'found in non-BGC context', 'GCFs'])
+
+		with open(recon_result_file) as orrf:
+			for i, line in enumerate(orrf):
+				if i == 0:
+					line = line.strip('\n')
+					colnames = set(line.split('\t'))
+					rs_numeric_columns = colnames.difference(rs_non_numeric_columns)
+
+		rs_data = loadTableInPandaDataFrame(recon_result_file, rs_numeric_columns)
+		rs_data.to_excel(writer, sheet_name='lsaBGC-Reconcile Results', index=False, na_rep="NA")
+		rs_sheet =  writer.sheets['lsaBGC-Reconcile Results']
+		rs_sheet.conditional_format('A1:CA1', {'type': 'cell', 'criteria': '!=', 'value': 'NA', 'format': header_format})
+
+		# create OG by sample/population spreadsheet
+		# TODO: add colors for populations
+
+		og_numeric_columns = set([])
+		og_non_numeric_columns = set(['sample'])
+
+		num_rows = 1
+		with open(recon_result_file) as orrf:
+			for i, line in enumerate(orrf):
+				if i == 0:
+					line = line.strip('\n')
+					colnames = set(line.split('\t'))
+					og_numeric_columns = colnames.difference(og_non_numeric_columns)
+					num_rows += 1
+		
+		og_data = loadTableInPandaDataFrame(recon_og_result_file, og_numeric_columns)
+		og_data.to_excel(writer, sheet_name='BGC OG by Sample Matrix', index=False, na_rep="NA")
+		og_sheet =  writer.sheets['BGC OG by Sample Matrix']
+		og_sheet.conditional_format('A1:CA2', {'type': 'cell', 'criteria': '!=', 'value': 'NA', 'format': header_format})
+		og_sheet.conditional_format('B3:CA' + str(num_rows),
+										{'type': '2_color_scale', 'min_color': "#f8f5fc", 'min_type': 'num', 'max_type': 'num',
+										'max_color': "#5a739c", "min_value": 0.0, "max_value": 2.0})		
+
+		# create lsaBGC-sociate spreadsheet
+
+		so_numeric_columns = set(['allele frequency', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 'beta-std-err', 'variant_h2'])
+		so_data = loadTableInPandaDataFrame(sociate_result_file, so_numeric_columns)
+		so_data.to_excel(writer, sheet_name='lsaBGC-Sociate Results', index=False, na_rep="NA")
+		so_sheet =  writer.sheets['lsaBGC-Sociate Results']
+		so_sheet.conditional_format('A1:CA1', {'type': 'cell', 'criteria': '!=', 'value': 'NA', 'format': header_format})
+
+		# close workbook 
+		workbook.close()
+	except:
+		msg = 'Difficulties creating final multi-sheet spreadsheet XLSX file!'
+		logObject.error(msg)
+		sys.stderr.write(msg +  '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')

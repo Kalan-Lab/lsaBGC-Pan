@@ -1,7 +1,6 @@
-- create table for population vs. gene view
+- switch to TOML instead of only setup.py
+- add/move zol-scape and refiner to zol
 
 REMINDER:
+
 - remember - it will take a while to set up the final spreadsheets.
-- reconcile - phylo.d (caper package) and codoff
-- added script in zol for annotation of any protein sequence.
-- https://subgraph.com/vega/documentation/Installing-Vega/index.en.html

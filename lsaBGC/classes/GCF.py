@@ -29,6 +29,8 @@ from Bio.codonalign.codonseq import CodonSeq, cal_dn_ds
 from lsaBGC.classes.BGC import BGC
 warnings.filterwarnings('ignore')
 
+SEED = 12345
+
 class GCF(Pan):
 	def __init__(self, bgc_genbanks_listing, gcf_id='GCF_X', logObject=None, lineage_name='Unnamed lineage'):
 		super().__init__(bgc_genbanks_listing, lineage_name=lineage_name, logObject=logObject)

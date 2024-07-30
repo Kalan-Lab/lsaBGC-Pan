@@ -131,7 +131,7 @@ def lsaBGC_See():
         for i, line in enumerate(oldlf):
             if i == 0: continue
             line = line.strip()
-            sample, population, method, genome_path, bgc_id, bgc_path, line_gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+            sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, line_gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
             if line_gcf_id == gcf_id:
                 glf_handle.write('\t'.join([sample, bgc_path, method]) + '\n')
     glf_handle.close()

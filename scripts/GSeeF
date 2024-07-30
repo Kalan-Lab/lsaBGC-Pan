@@ -121,13 +121,13 @@ def GSeeF():
 			for i, line in enumerate(oldl):
 				if i == 0: continue
 				line = line.strip()
-				sample, population, method, genome_path, bgc_id, bgc_gbk, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+				sample, population, method, genome_path, bgc_id, bgc_gbk, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
 				gcf_samples[gcf_id].add(sample)
 				all_samples.add(sample)
 				if method.upper() == 'ANTISMASH':
-					bgc_annotation = parseAntiSMASHGBKForFunction(bgc_gbk, logObject)
+					bgc_annotation = util.parseAntiSMASHGBKForFunction(bgc_gbk, logObject)
 				elif method.upper() == 'GECCO':
-					bgc_annotation = parseGECCOGBKForFunction(bgc_gbk, logObject)
+					bgc_annotation = util.parseGECCOGBKForFunction(bgc_gbk, logObject)
 				gcf_sample_annotations[gcf_id][sample].add(bgc_annotation)
 	except:
 		msg = 'Difficulty processing input listing file.'
@@ -248,47 +248,6 @@ def GSeeF():
 	sys.stdout.write('GSeeF completed! Check out the major results in the folder:\n%s\n' % final_results_dir)
 	util.closeLoggerObject(logObject)
 	sys.exit(0)
-
-def parseGECCOGBKForFunction(bgc_gbk, logObject):
-	try:
-		rec = SeqIO.read(bgc_gbk, 'genbank')
-		product = 'unknown'
-		try:
-			product = rec.annotations['structured_comment']['GECCO-Data']['biosyn_class']
-		except:
-			try:
-				product = rec.annotations['structured_comment']['GECCO-Data']['cluster_type']
-			except:
-				pass
-		if product == 'Unknown':
-			product = 'unknown'
-		return(product)
-	except:
-		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
-		raise RuntimeError()
-
-def parseAntiSMASHGBKForFunction(bgc_gbk, logObject):
-	product = 'unknown'
-	try:
-		products = set([])
-		with open(bgc_gbk) as obg:
-			for rec in SeqIO.parse(obg, 'genbank'):
-				for feat in rec.features:
-					if feat.type == 'protocluster':
-						try:
-							products.add(feat.qualifiers.get('product')[0])
-						except:
-							pass
-		if len(products) == 1:
-			product = list(products)[0]
-		elif len(products) == 2 and 'NRPS-like' in products and 'NRPS' in products:
-				product = 'NRPS'
-		elif len(products) >= 2:
-			product = 'multi-type'
-	except:
-		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
-		raise RuntimeError()
-	return(product)
 
 def runPlotting(workspace, phylo_file, heatmap_file, png_file, legend_png_file, logObject):
 	try:

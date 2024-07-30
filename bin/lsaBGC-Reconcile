@@ -45,7 +45,9 @@ from collections import defaultdict
 from Bio import SeqIO
 import multiprocessing
 import traceback
+import math
 from ete3 import Tree
+import statistics
 
 warnings.filterwarnings('ignore')
 
@@ -145,26 +147,32 @@ def lsaBGC_Reconcile():
             og = ls[0] 
             for lts in ls[1:]:
                 for lt in lts.split(', '):
-                    if lt == '': continue
+                    if lt.strip() == '': continue
                     lt_to_og[lt] = og
-                    og_lts[og].add(lt) 
+                    og_lts[og].add(lt)
 
     bgc_ogs = set([])
     sample_gbks = {}
     sample_pops = {}
     og_gcfs = defaultdict(set)
     og_samples = defaultdict(set)
-    lt_to_gcf = defaultdict(dict)
+    og_populations = defaultdict(set)
+    population_samples = defaultdict(set)
+    lt_to_gcf = defaultdict(lambda: defaultdict(lambda: 'Not in BGC'))
     all_pops = set([])
     all_gcfs = set([])
+    all_samples = set([])
+    bgc_lts = set([])
     with open(lsabgc_detailed_listing) as oldlf:
         for i, line in enumerate(oldlf):
             if i == 0: continue
             line = line.strip()
-            sample, population, method, genome_path, bgc_id, bgc_path, gcf_id, scaffold, start, end, dist_to_edge = line.split('\t')
+            sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
             all_gcfs.add(gcf_id)
             all_pops.add(population)
+            all_samples.add(sample)
             sample_pops[sample] = population
+            population_samples[population].add(sample)
             sample_gbks[sample] = genome_path
             with open(bgc_path) as obp:
                 for rec in SeqIO.parse(obp, 'genbank'):
@@ -172,9 +180,11 @@ def lsaBGC_Reconcile():
                         if feat.type != 'CDS': continue 
                         lt = feat.qualifiers.get('locus_tag')[0]
                         og = lt_to_og[lt]
+                        bgc_lts.add(lt)
                         bgc_ogs.add(og)
                         og_gcfs[og].add(gcf_id)
                         og_samples[og].add(sample)
+                        og_populations[og].add(population)
                         lt_to_gcf[sample][lt] = gcf_id
 
     bgc_og_protseq_dir = scratchdir + 'BGC_OG_Protein_Seqs/'
@@ -185,16 +195,26 @@ def lsaBGC_Reconcile():
     bgc_og_visuals_dir = outdir + 'BGC_OG_Phylogenetic_Visualizations/'
     bgc_og_visuals_script_dir = outdir + 'BGC_OG_PhyloViz_Scripts/'
 
-    util.setupReadyDirectory([bgc_og_protseq_dir, bgc_og_protalgn_dir, bgc_og_prottree_dir, bgc_og_tracks_dir, bgc_og_visuals_dir])
+    util.setupReadyDirectory([bgc_og_protseq_dir, bgc_og_protalgn_dir, bgc_og_prottrim_dir, bgc_og_prottree_dir, bgc_og_tracks_dir, bgc_og_visuals_dir, bgc_og_visuals_script_dir])
 
+    found_in_nonbgc_context = defaultdict(lambda: False)
+    og_visited = set([])
+    og_populations_total = defaultdict(set)
+    og_samples_total = defaultdict(set)
+    sample_og_lts = defaultdict(lambda: defaultdict(set))
     for sample in sample_gbks:
         sample_gbk = sample_gbks[sample]
         with open(sample_gbk) as osg:
-            for rec in SeqIO.parse(osg):
+            for rec in SeqIO.parse(osg, 'genbank'):
                 for feat in rec.features:
-                    lt = feat.qualifiers.get('locus_tag')
+                    lt = feat.qualifiers.get('locus_tag')[0]
                     og = lt_to_og[lt]
                     if og in bgc_ogs:
+                        if not lt in bgc_lts:
+                            found_in_nonbgc_context[og] = True
+                        og_samples_total[og].add(sample)
+                        og_populations_total[og].add(sample_pops[sample])
+                        sample_og_lts[sample][og].add(lt)
                         prot_seq = feat.qualifiers.get('translation')[0]
                         og_prot_faa = bgc_og_protseq_dir + og + '.faa'
                         opf_handle = open(og_prot_faa, 'a+')
@@ -204,7 +224,12 @@ def lsaBGC_Reconcile():
                         og_gcf = lt_to_gcf[sample][lt]
                         og_track_file = bgc_og_tracks_dir + og + '.txt'
                         otf_handle = open(og_track_file, 'a+')
-                        otf_handle.write(lt + '\t' + og_pop + '\t' + og_gcf + '\n')    
+                        if not og in og_visited:
+                            otf_handle.write('label\ttype\tvalue\n')
+                        otf_handle.write(sample + '|' + lt + '\tpopulation\t' + og_pop + '\n')
+                        otf_handle.write(sample + '|' + lt + '\tgcf\t' + og_gcf + '\n')    
+                        otf_handle.close()
+                        og_visited.add(og)
 
     pop_count = len(all_pops)
     population_color_file = scratchdir + 'pop_colors.txt'
@@ -212,15 +237,29 @@ def lsaBGC_Reconcile():
     population_color_mapping_file = scratchdir + 'pop_colors_mapping.txt'
     util.mapColorsToCategories(all_pops, population_color_file, population_color_mapping_file)
     population_color_legend_pdf = outdir + 'population_coloring.pdf'
-    plotLegend(population_color_mapping_file, population_color_legend_pdf, logObject)
+    plotLegend(population_color_mapping_file, population_color_legend_pdf, scratchdir, logObject)
 
     gcf_count = len(all_gcfs)
     gcf_color_file = scratchdir + 'gcf_colors.txt'
     util.generateColors(scratchdir, gcf_color_file, gcf_count, palette='Pastel1', palette_color_count=9)
     gcf_color_mapping_file = scratchdir + 'gcf_colors_mapping.txt' 
     util.mapColorsToCategories(all_gcfs, gcf_color_file, gcf_color_mapping_file)
+    gcmf_handle = open(gcf_color_mapping_file, 'a+')
+    gcmf_handle.write('Not in BGC\t"#808080"\n')
+    gcmf_handle.close()
     gcf_color_legend_pdf = outdir + 'gcf_coloring.pdf'
-    plotLegend(gcf_color_mapping_file, gcf_color_legend_pdf, logObject)
+    plotLegend(gcf_color_mapping_file, gcf_color_legend_pdf, scratchdir, logObject)
+
+    combined_color_map_file = scratchdir + 'gcf_and_pop_colors_mapping.txt'
+    ccmf_handle = open(combined_color_map_file, 'w')
+    with open(gcf_color_mapping_file) as ogcmf:
+        for line in ogcmf:
+            ccmf_handle.write(line)
+    with open(population_color_mapping_file) as opcmf:
+        for i, line in enumerate(opcmf):
+            if i == 0: continue 
+            ccmf_handle.write(line)
+    ccmf_handle.close()
 
     muscle_cmds = []
     trimal_cmds = []
@@ -237,10 +276,10 @@ def lsaBGC_Reconcile():
 
         muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
         if high_qual_flag:
-             muscle_cmd = ['muscle', '-align', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
+            muscle_cmd = ['muscle', '-align', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
         trimal_cmd = ['trimal', '-in', og_prot_msa, '-out', og_prot_trim, '-strict']
         fasttree_cmd = ['fasttree', og_prot_trim, '>', og_prot_tre]
-        plot_input = [og_prot_tre, og_track_file, og_rscript_file, og_pdf_file]
+        plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject]
         muscle_cmds.append(muscle_cmd)
         trimal_cmds.append(trimal_cmd)
         fasttree_cmds.append(fasttree_cmd)
@@ -286,17 +325,74 @@ def lsaBGC_Reconcile():
         sys.stderr.write(traceback.format_exc())
         sys.exit(1)
 
-    final_tsv_file = outdir + 'Orthogroup_Overview.txt'
-    ftf_handle = open(final_tsv_file, 'w')
-    ftf_handle.write('\t'.join(['orthogroup', 'GCFs', 'populations', 'conservation', 'norm_max_bd', 'mean_bd', 'max_bd'] + [pop + '_conservation' for pop in sorted(all_pops)]) + '\n')
+    samples_ordered = []
+    for pop in sorted(all_pops):
+        for sample in sorted(population_samples[pop]):
+            samples_ordered.append(sample)
     
     st_pds = util.pairwiseDistancesFromTree(species_tree_file, logObject)
-
+    final_tsv_file = outdir + 'Orthogroup_Summary_Info.txt'
+    final_overview_tsv_file = outdir + 'Orthogroup_by_Sample_Copy_Count.txt'
+    ftf_handle = open(final_tsv_file, 'w')
+    ftf2_handle = open(final_overview_tsv_file, 'w')
+    ftf_handle.write('\t'.join(['orthogroup', 'GCF count', 'found in non-BGC context', 'population count total', 'population count in BGC context', 'GCFs', 'conservation total', 'conservation in BGC context', 'norm_max_bd', 'mean_bd', 'max_bd'] + [pop + ' conservation' for pop in sorted(all_pops)]) + '\n')
+    ftf2_handle.write('\t'.join(['sample'] + samples_ordered) + '\n')
+    ftf2_handle.write('\t'.join(['sample'] + [sample_pops[sample] for sample in samples_ordered]) + '\n')
     for bo in bgc_ogs:
         og_prot_tre = bgc_og_prottree_dir + bo + '.tre'
         gt_pds = util.pairwiseDistancesFromTree(og_prot_tre, logObject)
-        pass
+
+        dist_ratios = []
+        for i, l1 in enumerate(sorted(gt_pds)):
+            l1s = l1.split('|')[0]
+            for j, l2 in enumerate(sorted(gt_pds)):
+                if i < j:
+                    l2s = l2.split('|')[0]
+                    if l1s == l2s: continue
+                    gene_tree_dist = gt_pds[l1][l2]
+                    species_tree_dist = st_pds[l1s][l2s] + 1e-10
+                    gene_tree_div_species_tree_dist = gene_tree_dist/species_tree_dist
+                    dist_ratios.append(gene_tree_div_species_tree_dist)    
+        mean_bd, max_bd, norm_max_bd = ['NA']*3
+        if len(dist_ratios) >= 3:
+            mean_bd = statistics.mean(dist_ratios) + 1e-10
+            max_bd = max(dist_ratios)
+            norm_max_bd = max_bd/mean_bd
+        
+        bo_gcf_count = len(og_gcfs[bo])
+        bo_gcfs = ', '.join(sorted(og_gcfs[bo]))
+
+        bo_pop_count = len(og_populations[bo])
+        bo_pop_tot_count = len(og_populations_total[bo])
+        
+        found_in_nonbgc = found_in_nonbgc_context[bo]
+
+        conservation = float(len(og_samples[bo]))/len(all_samples)
+        conservation_total = float(len(og_samples_total[bo])/len(all_samples))
+        
+        pop_conservations = []
+        for pop in sorted(all_pops):
+            tot_samples = 0
+            has_bo_samples = 0
+            for sample in population_samples[pop]:
+                tot_samples += 1
+                if sample in og_samples[bo]:
+                    has_bo_samples += 1
+            pop_cons_prop = has_bo_samples/tot_samples
+            pop_conservations.append(pop_cons_prop)
+        
+        sample_copycount = []
+        for sample in samples_ordered:
+            sample_copycount.append(len(sample_og_lts[sample][bo]))
+
+        row = [str(x) for x in ([bo, bo_gcf_count, found_in_nonbgc, bo_pop_tot_count, bo_pop_count, bo_gcfs, conservation_total, conservation, norm_max_bd, mean_bd, max_bd] + pop_conservations)]
+        row2 = [str(x) for x in ([bo] + sample_copycount)]
+        
+        ftf_handle.write('\t'.join(row) + '\n')
+        ftf2_handle.write('\t'.join(row2) + '\n')
+
     ftf_handle.close()
+    ftf2_handle.close()
 
     # Write checkpoint file 
     checkpoint_file = outdir + 'CHECKPOINT.txt'
@@ -317,13 +413,13 @@ def plotLegend(color_file, color_legend_pdf, scratchdir, logObject):
         gs_handle.write('library(grid)\n')
         gs_handle.write('library(gridExtra)\n\n')
 
-        gs_handle.write('dat <- read.table("' + color_file + '", sep="\\t", header=F)\n')
-        gs_handle.write('gcf_colors <- c(dat$V2)\n')
-        gs_handle.write('names(gcf_colors) <- c(heatmap.data.select$annotation)\n\n')
+        gs_handle.write('dat <- read.table("' + color_file + '", sep="\\t", header=T)\n')
+        gs_handle.write('colors <- c(dat$color)\n')
+        gs_handle.write('names(colors) <- c(dat$category)\n\n')
 
-        gs_handle.write('png("' + color_legend_pdf + '", height=10, width=5, units="in", res=300)\n')
-        gs_handle.write('my_hist <- ggplot(heatmap.data, aes(x=annotation, y=1, fill = annotation)) + geom_bar(stat="identity") + scale_fill_manual(values=gcf_colors)\n')
-        gs_handle.write('legend <- cowplot::get_legend(my_hist)\n')
+        gs_handle.write('pdf("' + color_legend_pdf + '", height=10, width=5)\n')
+        gs_handle.write('fake_bar <- ggplot(dat, aes(x=category, y=1, fill = category)) + geom_bar(stat="identity") + scale_fill_manual(values=colors)\n')
+        gs_handle.write('legend <- cowplot::get_legend(fake_bar)\n')
         gs_handle.write('grid.newpage()\n')
         gs_handle.write('grid.draw(legend)\n')
         gs_handle.write('dev.off()\n\n')
@@ -331,62 +427,58 @@ def plotLegend(color_file, color_legend_pdf, scratchdir, logObject):
         gs_handle.close()
 		
         rscript_cmd = ['Rscript', legend_script]
-        util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[png_file, legend_png_file])
+        util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[color_legend_pdf])
     except:
-        msg = 'Issues running image creation (which is primarily based on the R library ggtree)'
+        msg = 'Issues creating legends for coloring of populations/GCFs.'
         sys.stderr.write(msg + '\n')   
+        sys.stderr.write(traceback.format_exc() + '\n')
         logObject.error(msg)
         sys.exit(1)
 
-def runPlotting(workspace, phylo_file, heatmap_file, png_file, legend_png_file, logObject):
-	try:
-		gseef_script = workspace + 'gseef_rscript.R'
-		gs_handle = open(gseef_script, 'w')
+def runPlotting(inputs):
+    og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject = inputs
+    try:
+        gs_handle = open(og_rscript_file, 'w')
 
-		gs_handle.write('library(ggplot2)\n')
-		gs_handle.write('library(ggtree)\n')
-		gs_handle.write('library(gggenes)\n')
-		gs_handle.write('library(ape)\n')
-		gs_handle.write('library(phytools)\n')
-		gs_handle.write('library(aplot)\n')
-		gs_handle.write('library(dplyr)\n')
-		gs_handle.write('library(grid)\n')
-		gs_handle.write('library(gridExtra)\n\n')
+        gs_handle.write('library(ggplot2)\n')  
+        gs_handle.write('library(ggtree)\n')
+        gs_handle.write('library(gggenes)\n')
+        gs_handle.write('library(ape)\n')
+        gs_handle.write('library(phytools)\n')
+        gs_handle.write('library(aplot)\n')
+        gs_handle.write('library(dplyr)\n')
+        gs_handle.write('library(grid)\n')
+        gs_handle.write('library(gridExtra)\n\n')
 
-		gs_handle.write('phylo.tree <- read.tree("' + phylo_file + '")\n')
-		gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
+        gs_handle.write('phylo.tree <- read.tree("' + og_prot_tre + '")\n')
 
-		gs_handle.write('heatmap.data <- read.table("' + heatmap_file + '", header=T, sep="\\t")\n')
-		gs_handle.write('heatmap.data.filt <- heatmap.data[heatmap.data$annotation != "absent",]\n')
-		gs_handle.write('heatmap.data.select <- distinct(heatmap.data.filt[c("annotation", "colors")])\n')
-		gs_handle.write('gcf_colors <- c(heatmap.data.select$colors)\n')
-		gs_handle.write('names(gcf_colors) <- c(heatmap.data.select$annotation)\n\n')
+        gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
 
-		gs_handle.write('png("' + png_file + '", height=10, width=20, units="in", res=300)\n')
-		gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')
-		gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = reorder(gcf, gcf_index), y = label, fill = annotation)) +\n') 
-		gs_handle.write('theme_classic() + scale_fill_manual(values=gcf_colors, na.value="white") +\n')
-		gs_handle.write('xlab("GCF IDs") + ylab("") + geom_tile(color="white", show.legend=F) +\n')
-		gs_handle.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
-		gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
-		gs_handle.write('dev.off()\n\n')
+        gs_handle.write('heatmap.data <- read.table("' + og_track_file + '", header=T, sep="\\t")\n')
+        gs_handle.write('colors.data <- read.table("' + combined_color_map_file + '", header=T, sep="\\t")\n')
 
-		gs_handle.write('png("' + legend_png_file + '", height=10, width=5, units="in", res=300)\n')
-		gs_handle.write('my_hist <- ggplot(heatmap.data, aes(x=annotation, y=1, fill = annotation)) + geom_bar(stat="identity") + scale_fill_manual(values=gcf_colors)\n')
-		gs_handle.write('legend <- cowplot::get_legend(my_hist)\n')
-		gs_handle.write('grid.newpage()\n')
-		gs_handle.write('grid.draw(legend)\n')
-		gs_handle.write('dev.off()\n\n')
+        gs_handle.write('colors <- c(colors.data$color)\n')
+        gs_handle.write('names(colors) <- c(colors.data$category)\n\n')
 
-		gs_handle.close()
+        gs_handle.write('pdf("' + og_pdf_file + '", height=10, width=20)\n')
+        gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')   
+        gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = type, y = label, fill = value)) +\n') 
+        gs_handle.write('theme_classic() + scale_fill_manual(values=colors, na.value="white") +\n')
+        gs_handle.write('xlab("") + ylab("") + geom_tile(color="white", show.legend=F) +\n')
+        gs_handle.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
+        gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
+        gs_handle.write('dev.off()\n\n')
+
+        gs_handle.close()
 		
-		rscript_cmd = ['Rscript', gseef_script]
-		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[png_file, legend_png_file])
-	except:
-		msg = 'Issues running image creation (which is primarily based on the R library ggtree)'
-		sys.stderr.write(msg + '\n')
-		logObject.error(msg)
-		sys.exit(1)
+        rscript_cmd = ['Rscript', og_rscript_file]
+        util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[og_pdf_file])
+    except:
+        msg = 'Issues running creation of orthogroup gene tree phylogeny for phylogeny: %s' % og_prot_tre
+        sys.stderr.write(msg + '\n')
+        logObject.error(msg)
+        sys.stderr.write(traceback.format_exc() + '\n')
+        sys.exit(1)
 
 if __name__ == '__main__':
     lsaBGC_Reconcile()

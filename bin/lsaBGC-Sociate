@@ -40,10 +40,12 @@ import sys
 from time import sleep
 import argparse
 from lsaBGC import util
-from lsaBGC.classes.GCF import GCF
 import warnings
 import traceback
-import subprocess
+from Bio import SeqIO
+from collections import defaultdict
+import multiprocessing
+import math
 
 warnings.filterwarnings('ignore')
 
@@ -60,6 +62,7 @@ def create_parser():
     
     Draws inspiration from the software/studies: 
       - Coinfinder by Whelan et al. 2020
+      - Study by Bruns et al. 2017
       - Study by Beavan, Domingo-Sananes, and McInerney et al. 2023
       - Study by Mohite et al. 2022
       - Goldfinder by Gavriildou, Paulitz and Resl et al. 2024     
@@ -88,7 +91,7 @@ def lsaBGC_Sociate():
     lsabgc_detailed_listing = os.path.abspath(myargs.lsabgc_detailed_listing)
     orthofinder_matrix_file = os.path.abspath(myargs.orthomatrix)
     outdir = os.path.abspath(myargs.output_directory) + '/'
-    species_tree = os.path.abspath(myargs.species_tree) + '/'
+    species_tree = os.path.abspath(myargs.species_phylogeny) 
 
     ### vet input files quickly
     try:
@@ -101,13 +104,20 @@ def lsaBGC_Sociate():
         sys.stderr.write("Output directory exists. Overwriting in 5 seconds ...\n ")
         sleep(5)
 
-    util.setupReadyDirectory([outdir, scratchdir])
+    util.setupReadyDirectory([outdir])
 
     """
     PARSE OPTIONAL INPUTS
     """
 
     threads = myargs.threads
+
+
+    parallel_jobs_4thread = max(math.floor(threads / 4), 1)
+    multi_thread = 4
+    if threads < 4:
+        multi_thread = threads
+        parallel_jobs_4thread = 1
 
     """
     START WORKFLOW
@@ -121,7 +131,7 @@ def lsaBGC_Sociate():
     # Log input arguments and update reference and query FASTA files.
     logObject.info("Saving parameters for future records.")
     parameters_file = outdir + 'Parameter_Inputs.txt'
-    parameter_values = [lsabgc_detailed_listing, orthofinder_matrix_file, outdir, species_tree, high_quality_flag, threads]
+    parameter_values = [lsabgc_detailed_listing, orthofinder_matrix_file, outdir, species_tree, threads]
     parameter_names = ["Detailed BGC Information File", "Ortholog by Sample Matrix File", "Output Directory",
                        "Species Phylogeny", "Threads"]
     util.logParametersToFile(parameters_file, parameter_names, parameter_values)
@@ -151,10 +161,10 @@ def lsaBGC_Sociate():
         sys.exit(1)
 
     # Step 1: Convert species tree to kinship-esque matrix
-    kinship_matrix = outdir + 'Kinship_Matrix.txt'
-    phylo_dist_cmd = ['python', pd_script, '--lmm', species_tree, '>', ]             
+    kinship_matrix_file = outdir + 'Kinship_Matrix.txt'
+    phylo_dist_cmd = ['python', pd_script, '--lmm', species_tree, '>', kinship_matrix_file]          
     try:
-        util.runCmdViaSubprocess(phylo_dist_cmd, logObject=logObject, check_files=[kinship_matrix])
+        util.runCmdViaSubprocess(phylo_dist_cmd, logObject=logObject, check_files=[kinship_matrix_file])
     except:
         msg = 'Issue generating kinship matrix from species phylogeny using the command: %s' % phylo_dist_cmd
         sys.stderr.write(msg + '\n')
@@ -163,14 +173,278 @@ def lsaBGC_Sociate():
         logObject.error(traceback.format_exc())
         sys.exit(1)
 
-    # Step 2: Create genotype matrix of orthog groups presence/absence info 
+    # Step 2: Create genotype matrix of ortholog groups presence/absence info 
+    genotype_og_matrix_file = outdir + 'Genotype_Matrix_OGs.txt'
+    gmf_og_handle = open(genotype_og_matrix_file, 'w')
+    lt_to_og = {}
+    og_samples = defaultdict(set)
+    all_samples = set([])
+    all_samples_ordered = []
+    with open(orthofinder_matrix_file) as oomf:
+        for i, line in enumerate(oomf):
+            line = line.strip('\n')
+            ls = line.split('\t')
+            if i == 0:
+                gmf_og_handle.write('\t'.join(ls) + '\n')
+                all_samples = set(ls[1:])
+                all_samples_ordered = ls[1:]
+            else:
+                og = ls[0]
+                printlist = [og]
+                for j, lts in enumerate(ls[1:]):
+                    if lts.strip() == '':
+                        printlist.append('0')
+                    else:
+                        printlist.append('1')
+                        sample = all_samples_ordered[j]
+                        og_samples[og].add(sample)
+                        for lt in lts.split(', '):
+                            lt_to_og[lt] = og
+                gmf_og_handle.write('\t'.join(printlist) + '\n')
+    gmf_og_handle.close()
 
+    # Step 3: Create phenotype/genotype matrix of GCFs presence/absence info
+    gcf_samples = defaultdict(set)
+    all_gcfs = set([])
+    gcf_ogs = defaultdict(set)
+    og_gcfs = defaultdict(set)
+    with open(lsabgc_detailed_listing) as oldlf:
+        for i, line in enumerate(oldlf):
+            if i == 0: continue
+            line = line.strip()
+            sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
+            gcf_samples[gcf_id].add(sample)
+            all_gcfs.add(gcf_id)
+            with open(bgc_path) as obp:
+                for rec in SeqIO.parse(obp, 'genbank'):
+                    for feat in rec.features:
+                        if feat.type != 'CDS': continue 
+                        lt = feat.qualifiers.get('locus_tag')[0]
+                        og = lt_to_og[lt]
+                        gcf_ogs[gcf_id].add(og)
+                        og_gcfs[og].add(gcf_id)
 
-    # Step 3: Create phenotype type files for BGC ortholog groups of interest and run pyseer
+    genotype_gcf_matrix_file = outdir + 'Genotype_Matrix_GCFs.txt'
+    ggm_gcf_handle = open(genotype_gcf_matrix_file, 'w')
+    ggm_gcf_handle.write('GCFs\t' + '\t'.join(sorted(all_samples)) + '\n')
+    gcfs_in_order = []
+    for gcf in sorted(gcf_samples):
+        gcfs_in_order.append(gcf)
+        printlist = [gcf]
+        for sample in sorted(list(all_samples)):
+            if sample in gcf_samples[gcf]:
+                printlist.append('1')
+            else:
+                printlist.append('0')
+        ggm_gcf_handle.write('\t'.join(printlist) + '\n')
+    ggm_gcf_handle.close()
 
-    # Step 4: Determine thresholds for significance
+    # Step 4: Run Pyseer to infer assocations between ortholog groups and GCFs and 
+    #         between GCFs and GCFs.
 
-    # Step 5: Consolidate into one final table
+    pyseer_results_dir = outdir + 'Pyseer_Results/'
+    pyseer_patterns_dir = outdir + 'Pyseer_Patterns/'
+    pyseer_thresh_dir = outdir + 'Pyseer_Thresholds/'
+    pyseer_inputs_dir = outdir + 'Pyseer_Inputs/'
+
+    util.setupReadyDirectory([pyseer_inputs_dir, pyseer_patterns_dir, pyseer_thresh_dir, pyseer_results_dir])
+
+    pyseer_cmds = []
+    count_cmds = []
+    for gcf in all_gcfs:
+        
+        pheno_gcf_input = pyseer_inputs_dir + gcf + '.txt'
+        pgi_handle = open(pheno_gcf_input, 'w')
+        for sample in all_samples:
+            val = '0'
+            if sample in gcf_samples[gcf]:
+                val = '1'
+            pgi_handle.write(sample + '\t' + str(val) + '\n')
+        pgi_handle.close()
+
+        og_result_file = pyseer_results_dir + gcf + '_OG_Results.txt'
+        og_pattern_file = pyseer_patterns_dir + gcf + '_OG_Patterns.txt'
+        og_count_file = pyseer_thresh_dir + gcf + '_OG_Threshold_Info.txt'
+        pyseer_og_cmd = ['pyseer', '--lmm', '--phenotypes', pheno_gcf_input, '--pres', 
+                        genotype_og_matrix_file, '--min-af', '0.05', '--max-af', '0.95', '--cpu', 
+                        '1', '--similarity', kinship_matrix_file, '--output-patterns', 
+                        og_pattern_file, '>', og_result_file]
+        count_og_cmd = ['python', cp_script, og_pattern_file, '>', og_count_file]
+        pyseer_cmds.append(pyseer_og_cmd)
+        count_cmds.append(count_og_cmd)
+
+        gcf_result_file = pyseer_results_dir + gcf + '_GCF_Results.txt'
+        gcf_pattern_file = pyseer_patterns_dir + gcf + '_GCF_Patterns.txt' 
+        gcf_count_file = pyseer_thresh_dir + gcf + '_GCF_Threshold_Info.txt' 
+        pyseer_gcf_cmd = ['pyseer', '--lmm', '--phenotypes', pheno_gcf_input, '--pres', 
+                        genotype_gcf_matrix_file, '--min-af', '0.05', '--max-af', '0.95', '--cpu', 
+                        '1', '--similarity', kinship_matrix_file, '--output-patterns', 
+                        gcf_pattern_file, '>', gcf_result_file]
+        count_gcf_cmd = ['python', cp_script, gcf_pattern_file, '>', gcf_count_file]
+        pyseer_cmds.append(pyseer_gcf_cmd)
+        count_cmds.append(count_gcf_cmd)
+
+    try:
+        p = multiprocessing.Pool(threads)
+        p.map(util.multiProcessNoLog, pyseer_cmds)
+        p.close()
+    except Exception as e:
+        msg = 'Issues running pyseer in parallel.\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    try:
+        p = multiprocessing.Pool(threads)
+        p.map(util.multiProcessNoLog, count_cmds)
+        p.close()
+    except Exception as e:
+        msg = 'Issues running count_patterns.py in parallel.\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    # Step 5: Determine thresholds for significance and apply filtering                       
+    gcf_pval_thresholds = defaultdict(lambda: defaultdict(lambda: 0.0))
+    for f in os.listdir(pyseer_thresh_dir):
+        gcf = '_'.join(f.split('_')[:2])
+        type = 'OG'
+        if f.endswith('_GCF_Threshold_Info.txt'):
+            type = 'GCF'
+        with open(pyseer_thresh_dir + f) as ogcf:
+            for line in ogcf:
+                line = line.strip()
+                if line.startswith('Threshold:'):
+                    pval_threshold = float(line.split()[1])
+                    gcf_pval_thresholds[gcf][type] = pval_threshold
+
+    hits = []
+    sociated_ogs = set([])
+    for f in os.listdir(pyseer_results_dir):
+        gcf = '_'.join(f.split('_')[:2])
+        type = 'OG'
+        if f.endswith('_GCF_Results.txt'):
+            type = 'GCF'
+        with open(pyseer_results_dir + f) as ogcf:
+            for i, line in enumerate(ogcf):
+                if i == 0: continue
+                line = line.strip()
+                ls = line.split('\t')
+                lrt_pval = float(ls[3])
+                if lrt_pval <= gcf_pval_thresholds[gcf][type]:
+                    genotype = ls[0]
+                    if genotype != gcf and not genotype in gcf_ogs[gcf]:
+                        hits.append([gcf] + ls)
+                        sociated_ogs.add(ls[0])
+
+    # Step 6: Annotate associated/disassociated orthogroups
+    bgc_og_protseq_dir = outdir + 'BGC_OG_Protein_Seqs/'
+    bgc_og_protalgn_dir = outdir + 'BGC_OG_Protein_Alignments/'
+    bgc_og_hmm_dir = outdir + 'BGC_OG_Protein_HMMs/'
+    bgc_og_consensus_dir = outdir + 'BGC_OG_Protein_Consensus_Sequences/'
+    util.setupReadyDirectory([bgc_og_protseq_dir, bgc_og_protalgn_dir, bgc_og_hmm_dir, bgc_og_consensus_dir])
+    
+    with open(lsabgc_detailed_listing) as oldlf:
+        for i, line in enumerate(oldlf):
+            if i == 0: continue
+            line = line.strip()
+            sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcfid, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
+            gcf_samples[gcf_id].add(sample)
+            all_gcfs.add(gcf_id)
+            with open(genome_path) as ogp:
+                for rec in SeqIO.parse(ogp, 'genbank'):
+                    for feat in rec.features:
+                        if feat.type != 'CDS': continue 
+                        lt = feat.qualifiers.get('locus_tag')[0]
+                        og = lt_to_og[lt]
+                        if og in sociated_ogs:
+                            prot_seq = feat.qualifiers.get('translation')[0]
+                            prot_faa = bgc_og_protseq_dir + og + '.faa'
+                            pf_handle = open(prot_faa, 'a+')
+                            pf_handle.write('>' + sample + '|' + lt + '\n' + prot_seq + '\n')
+                            pf_handle.close()
+
+    muscle_cmds = []
+    hmmbuild_cmds = []
+    hmmemit_cmds = []
+    for og in sociated_ogs:
+        og_prot_faa = bgc_og_protseq_dir + og + '.faa'
+        og_prot_msa = bgc_og_protalgn_dir + og + '.msa.faa'
+        og_prot_hmm = bgc_og_hmm_dir + og + '.hmm'
+        og_prot_con = bgc_og_consensus_dir + og + '.faa'
+
+        muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
+        muscle_cmds.append(muscle_cmd)
+
+        hmmbuild_cmd = ['hmmbuild', '--amino', '--cpu', '1', '-n', og, og_prot_hmm, og_prot_msa]
+        hmmbuild_cmds.append(hmmbuild_cmd)
+		
+        hmmemit_cmd = ['hmmemit', '-c', '-o', og_prot_con, og_prot_hmm, ]
+        hmmemit_cmds.append(hmmemit_cmd)
+    
+    try:
+        p = multiprocessing.Pool(parallel_jobs_4thread)
+        p.map(util.multiProcessNoLog, muscle_cmds)
+        p.close()
+    except Exception as e:
+        msg = 'Issues running muscle in parallel!\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    try:
+        p = multiprocessing.Pool(threads)
+        p.map(util.multiProcessNoLog, hmmbuild_cmds)
+        p.close()
+    except Exception as e:
+        msg = 'Issues running hmmbuild in parallel.\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    try:
+        p = multiprocessing.Pool(threads)
+        p.map(util.multiProcessNoLog, hmmemit_cmds)
+        p.close()
+    except Exception as e:
+        msg = 'Issues running hmmemit in parallel.\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    consensus_results_file = outdir + 'Sociated_OGs_Consensus_Sequences.faa'
+    crf_handle = open(consensus_results_file, 'w')
+    for f in os.listdir(bgc_og_consensus_dir):
+        og = f.split('.faa')[0]
+        with open(bgc_og_consensus_dir + f) as ocf:
+            for rec in SeqIO.parse(ocf, 'fasta'):
+                crf_handle.write('>' + og + '\n' + str(rec.seq) + '\n')
+    crf_handle.close()
+
+    annot_dir = outdir + 'Sociated_OGs_Annotations/'
+    annotation_result = annot_dir + 'Annotation_Results.tsv'
+    annotate_cmd = ['annotateProtSeqs.py', '-i', consensus_results_file, '-o', annot_dir, '-c', str(threads)]
+    util.runCmdViaSubprocess(annotate_cmd, logObject=logObject, check_files=[annotation_result])
+
+    soc_og_annotations = defaultdict(lambda: ['NA']*9)
+    with open(annotation_result) as oar:
+        for line in oar:
+            line = line.strip('\n')
+            prot, ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots, prot_seq = line.split('\t')
+            soc_og_annotations[prot] = [ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots]
+
+    # Step 7: Create final results file
+
+    final_result_tsv = outdir + 'Final_Sociated_Results.tsv'
+    frt = open(final_result_tsv, 'w')
+    header = ['focal GCF', 'assocaited GCF/OG', 'allele frequency', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 
+              'beta-std-err', 'variant_h2', 'notes', 'KO Annotation (E-value)', 'PGAP Annotation (E-value)', 
+              'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)', 'IS Finder (E-value)', 
+              'MI-BiG Annotation (E-value)', 'VOG Annotation (E-value)',  'VFDB Annotation (E-value)', 'Pfam Domains']
+    frt.write('\t'.join(header) + '\n')
+    for hit in hits:
+        frt.write('\t'.join(hit + soc_og_annotations[hit[1]]) + '\n')
+    frt.close()
 
     # Write checkpoint file 
     checkpoint_file = outdir + 'CHECKPOINT.txt'

@@ -107,7 +107,6 @@ class Pan:
 
 					BGC_Object = BGC(gbk, bgc_id, is_expansion_bgc=is_expansion_bgc, prediction_method=prediction_method)
 					BGC_Object.parseGenbanks(comprehensive_parsing=comprehensive_parsing)
-					
 
 					self.pan_bgcs[bgc_id] = BGC_Object
 					self.comp_gene_info.update(BGC_Object.gene_information)
