@@ -116,7 +116,7 @@ def create_parser():
 	*******************************************************************************************************************
 	""", formatter_class=argparse.RawTextHelpFormatter)
 
-	parser.add_argument('-a', '--antismash-results-directory', help="A directory where subdirectories under the main directory should coincide with antiSMASH results per sample/genome [Optional].", required=False, default=None)
+	parser.add_argument('-a', '--antismash-results-directory', help="A directory with subdirectories corresponding to antiSMASH results per sample/genome [Optional].", required=False, default=None)
 	parser.add_argument('-g', '--genomes-directory', help="A directory with additional genomes, e.g. those recently sequenced by the\nuser, belonging to the taxa. Accepted formats include FASTA.\nAccepted suffices include: .fna, .fa, .fasta. Will run GECCO for BGC-predictions [Optional].", required=False, default=None)
 	parser.add_argument('-o', '--output-directory', help="Parent output/workspace directory.", required=True)
 
@@ -125,7 +125,7 @@ def create_parser():
 	parser.add_argument('-rg', '--run-gecco', action='store_true', help="If antiSMASH results are provided also run GECCO for annotation of BGCs.", required=False, default=False)
 
 	parser.add_argument('-up', '--use-panaroo', action='store_true', help='Use Panaroo instead of OrthoFinder for orthology inference. Recommended if investigating a single bacterial species.', default=False, required=False)
-	parser.add_argument('-omc', '--run-coarse-orthofinder', action='store_true', help='Use coarse clustering of homolog groups in OrthoFinder instead of more\nresolute hierarchical determined homolog groups. There are some advantages to coarse\nOGs, including their construction being deterministic.', required=False, default=False)
+	parser.add_argument('-omc', '--run-coarse-orthofinder', action='store_true', help='Use coarse clustering for orthogroups in OrthoFinder instead of the more\nresolute hierarchical determined homolog groups. There are some advantages to coarse\nOGs, including their construction being deterministic.', required=False, default=False)
 	parser.add_argument('-ohq', '--run-msa-orthofinder', action='store_true', help='Run OrthoFinder using multiple sequence alignments instead of DendroBlast to determine hierarchical ortholog groups.', required=False, default=False)
 
 	parser.add_argument('-hqp', '--high-quality-phylogeny', action='store_true', help='Prioritize quality over speed for phylogeny construction.', required=False, default=False)
