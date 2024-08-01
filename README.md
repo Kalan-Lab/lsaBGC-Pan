@@ -2,7 +2,7 @@
 
 ### *lsa*BGC-Pan - *mine the pan-BGC-ome of a microbial taxon for biosynthetic golden nuggets.*
 
-*lsa*BGC-Pan reconfigures [*lsa*BGC](https://github.com/Kalan-Lab/lsaBGC) for easier installation via both Docker and Bioconda and features a new workflow bearing the same name as the repo. In addition to easier usability, there are some new analytical modules -e.g. (de-)association testing of BGC ortholog groups and GCFs and an improved framework for inferring horizontal transfer. Another key advantage is that it allows for joint analysis of both AntiSMASH and GECCO BGC predictions for a set of samples/genomes. 
+*lsa*BGC-Pan reconfigures [*lsa*BGC](https://github.com/Kalan-Lab/lsaBGC) for easier installation via both Docker and Bioconda and features a new workflow bearing the same name as the repo. In addition to easier usability, there are some new analytical modules -e.g. (de-)association testing of BGC ortholog groups and GCFs and an improved framework for inferring horizontal transfer. Another important new feature is the ability for joint analysis of both AntiSMASH and GECCO BGC predictions for a set of samples/genomes. 
 
 The workflow has been tested to work with both bacterial and fungal genomes, but if you stumble on a bug/unexpected-error please open a GitHub issue and let us know!
 
@@ -18,7 +18,7 @@ Documentation and three separate tutorial showing application to:
 
 * A small set of 7 *Cutibacterium avidum* and *Cutibacterium acnes* genomes (test dataset included with repo)
 * A set of 12 *Aspergillus flavus* genomes (fungal showcase)
-* A set of 23 distinct *Streptomyces olivaceus* strains
+* A set of 23 distinct *Streptomyces olivaceus* strains (shows joint AntiSMASH + GECCO analysis)
 
 can be found on the wiki at: https://github.com/Kalan-Lab/lsaBGC-Pan/wiki
 
