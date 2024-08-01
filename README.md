@@ -6,7 +6,9 @@
 
 The workflow has been tested to work with both bacterial and fungal genomes, but if you stumble on a bug/unexpected-error please open a GitHub issue and let us know!
 
+<p align="center">
 <img src="https://github.com/Kalan-Lab/lsaBGC-Pan/assets/4260723/3aa3426e-39d6-4d25-91a3-44be288a6ad4" width="300">
+</p>
 
 ### Manuscript:
 
