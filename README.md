@@ -1,6 +1,6 @@
 # *lsa*BGC-Pan
 
-### *lsa*BGC-Pan - *helping you mine the pan-BGC-ome of a microbial taxon for biosynthetic golden nuggets.*
+### *lsa*BGC-Pan - *mine the pan-BGC-ome of a microbial taxon for biosynthetic golden nuggets.*
 
 *lsa*BGC-Pan reconfigures (*lsa*BGC)[https://github.com/Kalan-Lab/lsaBGC] for easier installation via both Docker and Bioconda and features a new workflow bearing the same name as the repo. In addition to easier usability, there are some new analytical modules -e.g. (de-)association testing of BGC ortholog groups and GCFs and an improved framework for inferring horizontal transfer. Another key advantage is that it allows for joint analysis of both AntiSMASH and GECCO BGC predictions for a set of samples/genomes. 
 
