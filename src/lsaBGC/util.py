@@ -1404,7 +1404,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 
 		er_sheet = workbook.add_worksheet('Explanation of Results')
 		er_sheet.write(0, 0, 'An explanation on the interpretation of the different sheets in this spreadsheet can be found online at:')
-		er_sheet.write(1, 0, 'https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/5.-explanation-of-final-spreadsheet-and-visual-reports')
+		er_sheet.write(1, 0, 'https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/8.-explanation-of-final-spreadsheet-and-visual-reports')
 
 		# specify different types of cell formatting 
 
