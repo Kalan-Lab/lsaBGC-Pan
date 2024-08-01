@@ -70,17 +70,19 @@ def create_parser():
 		
 	*******************************************************************************************************************
 	NOTES & CONSIDERATIONS:	
-	* Check out the considerations wiki page: https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/00.-Background-&-Considerations  	
+	* Check out the documentation at: https://github.com/Kalan-Lab/lsaBGC-Pan/wiki 	
 	* Either provide an antiSMASH results directory or a directory with genomes (not both!).
-	* lsaBGC-Pan does not have expansion functionalities to make things simpler and more straightforward - thus to make 
-	  sure your analysis runs in a relatively timely manner, the program is restricted to handling data from 4-200 genomes.
-		- Consider using tools for dereplication/strain-clustering (such as skDER, dRep, PopPunk, or treemmer) to prune
-		  down your set of genomes.
+	* lsaBGC-Pan does not have all the  functionalities of the original lsaBGC suite to make things simpler and more 
+          straightforward. In particular, lsaBGC-(Auto)Expansion, which helped with scalability is discluded because its 
+          usage generally requires more careful consideration and manual curation. Thus, to make sure your analysis runs 
+          in a relatively timely manner, the program is restricted to handling data from 4-200 genomes.
+		- Consider using tools for dereplication/strain-clustering (such as skDER/CiDDER, dRep, PopPunk, or 
+                  treemmer) to prune down your set of genomes if you have more than 200.
 	* Panaroo should only be used if working with genomes belonging to a single bacterial species. If working with 
 	  multiple bacterial species or fungal genomes, please use OrthoFinder instead.
-	* Specifying fungal mode makes sure OrthoFinder is being used and that antiSMASH results were provided. In addition,
-	  customized processing designed for bacterial genomics is not performed and a more direct extraction of hierarchical 
-	  orthogroups is applied.
+	* Specifying fungal mode makes sure OrthoFinder is being used and that antiSMASH results were provided. GECCO is 
+          not designed for fungal genomes. In addition, customized processing designed for bacterial genomics is not 
+          performed and a more direct extraction of hierarchical orthogroups is applied.
 	*******************************************************************************************************************
 	OVERVIEW OF WORKFLOW STEPS:	
 		PART 1
@@ -108,7 +110,7 @@ def create_parser():
 		- Step 7: Parallel running of zol (twice with and without the -ace option) per GCF.
 		- Step 8: Parallel running of GSeeF, lsaBGC-See, and lsaBGC-ComprehenSeeIve per GCF.
 		- Step 9: Parallel running of lsaBGC-MIBiGMapper.
-		- Step 10 Parallel running of lsaBGC-Reconcile and lsaBGC-Sociate.
+		- Step 10: Parallel running of lsaBGC-Reconcile and lsaBGC-Sociate.
 		- Step 11: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate 
 				   results [no checkpoint, always rerun].
 	*******************************************************************************************************************
@@ -326,7 +328,8 @@ addition, lsaBGC uses locus tags - which are automatically renamed
 to ensure seamless computing - if retention of original locus tags
 is preferred, users can issue the --keep_locus_tags option.
 			"""
-			print(msg_about_antismash_input)
+			sys.stdout.write(msg_about_antismash_input + '\n')
+			logObject.info(msg_about_antismash_input)
 
 			sample_count = 0
 			sample_bgc_regions = defaultdict(list)
@@ -882,7 +885,9 @@ of the PDF report showing the impact of parameters on clustering
 found at: %s 
 and PDF graphics of the species phylogeny with 
 different population divisions marked which can be found in the 
-directory %s. 
+directory %s. For more insight into how to select appropriate 
+parameters, check out: 
+https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-during-midway-break
 		""" % (cluster_results_dir + '', popstrat_results_dir + '')
 	
 		logObject.info(msg_about_manual_param_selection)
