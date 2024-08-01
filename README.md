@@ -35,7 +35,7 @@ lsaBGC-Pan -a AntiSMASH_Results/ -o Pan_Results/ -c 10
 Provide a directory of AntiSMASH Results as input and incorporate GECCO BGC predictions as well:
 
 ```bash
-lsaBGC-Pan -a AntiSMASH_Results/ -o Pan_Results/ -c 10
+lsaBGC-Pan -a AntiSMASH_Results/ -o Pan_Results/ -c 10 -rg
 ```
 
 Provide a directory of genomes in FASTA format for GECCO-based BGC predictions and analysis: 
