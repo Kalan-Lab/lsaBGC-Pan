@@ -20,6 +20,4 @@ Documentation and three separate tutorial showing application to:
 * A set of 12 *Aspergillus flavus* genomes (fungal showcase)
 * A set of 23 distinct *Streptomyces olivaceus* strains
 
-can be found on the wiki at:  
-
-### Installation: 
+can be found on the wiki at: https://github.com/Kalan-Lab/lsaBGC-Pan/wiki
