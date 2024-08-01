@@ -1,10 +1,25 @@
 # *lsa*BGC-Pan
-*lsa*BGC-Pan - *helping you mine the pan-BGC-ome of a microbial taxon for biosynthetic golden nuggets.*
 
-lsaBGC-Pan is largely the same lsaBGC package reconfigured for easier installation via both Docker and Bioconda and featuring a snew workflow bearing the same name as the repo. There are some additional new analytical options -e.g. (de-)association testing of BGC ortholog groups and GCFs -, the lsaBGC-(Auto)Expansion functionalities have been taken out, and lsaBGC-PopGene has been replaced with zol. 
+### *lsa*BGC-Pan - *helping you mine the pan-BGC-ome of a microbial taxon for biosynthetic golden nuggets.*
+
+*lsa*BGC-Pan reconfigures (*lsa*BGC)[https://github.com/Kalan-Lab/lsaBGC] for easier installation via both Docker and Bioconda and features a new workflow bearing the same name as the repo. In addition to easier usability, there are some new analytical modules -e.g. (de-)association testing of BGC ortholog groups and GCFs and an improved framework for inferring horizontal transfer. Another key advantage is that it allows for joint analysis of both AntiSMASH and GECCO BGC predictions for a set of samples/genomes. 
+
+The workflow has been tested to work with both bacterial and fungal genomes, but if you stumble on a bug/unexpected-error please open a GitHub issue and let us know!
 
 <img src="https://github.com/Kalan-Lab/lsaBGC-Pan/assets/4260723/3aa3426e-39d6-4d25-91a3-44be288a6ad4" width="300">
 
-### Manuscript
+### Manuscript:
 
 > [Evolutionary investigations of the biosynthetic diversity in the skin microbiome using *lsa*BGC](https://www.microbiologyresearch.org/content/journal/mgen/10.1099/mgen.0.000988). *Microbial Genomics 2023.* Rauf Salamzade, J.Z. Alex Cheong, Shelby Sandstrom, Mary Hannah Swaney, Reed M. Stubbendieck, Nicole Lane Starr, Cameron R. Currie, Anne Marie Singh, and Lindsay R. Kalan
+
+### Documentation:
+
+Documentation and three separate tutorial showing application to:
+
+* A small set of 7 *Cutibacterium avidum* and *Cutibacterium acnes* genomes (test dataset included with repo)
+* A set of 12 *Aspergillus flavus* genomes (fungal showcase)
+* A set of 23 distinct *Streptomyces olivaceus* strains
+
+can be found on the wiki at:  
+
+### Installation: 
