@@ -59,6 +59,8 @@ def create_parser():
 	parser.add_argument('-i', '--mcl_inflation', type=float, help="Inflation parameter to be used for MCL [Default is 1.4].", required=False, default=1.4)
 	parser.add_argument('-j', '--jaccard_cutoff', type=float, help="Cutoff for Jaccard similarity of homolog groups shared between two BGCs [Default is 50.0].", required=False, default=50.0)
 	parser.add_argument('-r', '--syntenic_correlation_cutoff', type=float, help="Minimum absolute correlation coefficient between two BGCs [Default is 0.0].", required=False, default=0.0)
+	parser.add_argument('-y', '--containment_cutoff', required=False, default='Percentage of fragmented gene clusters OGs needed to be present in the comparing gene cluster to be considered a pair automatically - assumming syntenic similarity is also met [Default is 70.0]', required=False, default=70.0)
+	parser.add_argument('-x', '--edge_distance_cutoff', help='Maximum distance to edge of contig to be considered fragmented [Default is 5000].', required=False, default=5000)
 	parser.add_argument('-s', '--split_by_annotation', action='store_true', help="Partition BGCs into groups based on annotation first.", required=False, default=False)
 	parser.add_argument('-t', '--run_parameter_tests', action='store_true', help="Run tests for selecting the best inflation parameter and jaccard for MCL analysis and exit.", required=False, default=False)
 	parser.add_argument('-c', '--threads', type=int, help="Number of threads to use for MCL step.", required=False, default=1)
@@ -100,6 +102,8 @@ def lsaBGC_Cluster():
 	mcl_inflation = myargs.mcl_inflation
 	jaccard_cutoff = myargs.jaccard_cutoff
 	syntenic_correlation_cutoff = myargs.syntenic_correlation_cutoff
+	containment_cutoff = myargs.containment_cutoff
+	edge_distance_cutoff = myargs.edge_distance_cutoff
 	run_parameter_tests = myargs.run_parameter_tests
 	split_by_annotation = myargs.split_by_annotation
 
@@ -117,10 +121,13 @@ def lsaBGC_Cluster():
 	logObject.info("Saving parameters for future records.")
 	parameters_file = outdir + 'Parameter_Inputs.txt'
 	parameter_values = [bgc_listings_file, orthofinder_matrix_file, outdir, threads, mcl_inflation,
-						jaccard_cutoff, syntenic_correlation_cutoff, run_parameter_tests, split_by_annotation]
+						jaccard_cutoff, syntenic_correlation_cutoff, run_parameter_tests, 
+						edge_distance_cutoff, containment_cutoff, split_by_annotation]
 	parameter_names = ["BGC Listing File", "OrthoFinder Orthogroups.tsv File", "Output Directory",
 					   "threads", "MCL Inflation Parameter", "Jaccard Similarity Cutoff",
 					   "Syntenic Correlation Coefficient Cutoff", "Run Inflation Parameter Tests?",
+					   "Distance to Contig Edge to Be Considered Fragmented", 
+					   "Containment OG Percentage for Fragmented BGCs",
 					   "Split BGCs into Annotation Categories First Prior to Clustering?"]
 	util.logParametersToFile(parameters_file, parameter_names, parameter_values)
 	logObject.info("Done saving parameters!")
@@ -130,7 +137,7 @@ def lsaBGC_Cluster():
 
 	# Step 1: Parse BGCs from Listing File
 	logObject.info("Starting to process BGC Genbanks from listing file.")
-	Pan_Object.readInBGCGenbanks(comprehensive_parsing=False)
+	Pan_Object.readInBGCGenbanks(comprehensive_parsing=False, edge_dist_cutoff=edge_distance_cutoff)
 	logObject.info("Successfully parsed BGC Genbanks.")
 
 	# Step 2: Parse OrthoFinder Homolog vs Sample Matrix
@@ -158,11 +165,11 @@ def lsaBGC_Cluster():
 		jaccard_cutoff_params = [0, 20, 30, 50, 75, 90]
 	for mip in mcl_inflation_params:
 		for jcp in jaccard_cutoff_params:
-			Pan_Object.runMCLAndReportGCFs(mip, jcp, syntenic_correlation_cutoff, mcl_outdir, run_parameter_tests=run_parameter_tests, threads=threads)
+			Pan_Object.runMCLAndReportGCFs(mip, jcp, syntenic_correlation_cutoff, containment_cutoff, mcl_outdir, run_parameter_tests=run_parameter_tests, threads=threads)
 
 	if run_parameter_tests:
 		Pan_Object.plotResultsFromUsingDifferentParameters(outdir)
-		Pan_Object.runMCLAndReportGCFs(mcl_inflation, jaccard_cutoff, syntenic_correlation_cutoff, outdir, run_parameter_tests=False, threads=threads)
+		Pan_Object.runMCLAndReportGCFs(mcl_inflation, jaccard_cutoff, syntenic_correlation_cutoff, containment_cutoff, outdir, run_parameter_tests=False, threads=threads)
 
 	logObject.info("Successfully ran MCL clustering analysis to determine eGCFs!")
 

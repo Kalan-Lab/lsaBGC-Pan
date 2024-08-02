@@ -421,7 +421,7 @@ def parseGECCOGBKForFunction(bgc_gbk, logObject):
 		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
 		raise RuntimeError()
 
-def parseAntiSMASHGBKForFunction(bgc_gbk, logObject):
+def parseAntiSMASHGBKForFunction(bgc_gbk, logObject, compress_multi=True):
 	product = 'unknown'
 	try:
 		products = set([])
@@ -438,7 +438,10 @@ def parseAntiSMASHGBKForFunction(bgc_gbk, logObject):
 		elif len(products) == 2 and 'NRPS-like' in products and 'NRPS' in products:
 				product = 'NRPS'
 		elif len(products) >= 2:
-			product = 'multi-type'
+			if compress_multi:
+				product = 'multi-type'
+			else:
+				product = ' | '.join(sorted(products))
 	except:
 		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
 		raise RuntimeError()

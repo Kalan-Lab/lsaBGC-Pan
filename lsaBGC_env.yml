@@ -7,19 +7,18 @@ dependencies:
   - r-base
   - setuptools
   - pip
-  - bioconda::zol>=1.4.11
-  - bioconda::muscle>=5.0
-  - bioconda::orthofinder=2.5.5
-  - bioconda::panaroo
-  - bioconda::pyseer>=1.3
-  - bioconda::gecco
-  - bioconda::prodigal
-  - bioconda::pyrodigal
-  - conda-forge::cxx-compiler
+  - zol>=1.4.11
+  - muscle>=5.0
+  - orthofinder=2.5.5
+  - panaroo
+  - pyseer>=1.3
+  - gecco=0.9.6
+  - prodigal
+  - pyrodigal
   - biopython
-  - conda-forge::tar
-  - conda-forge::pandas
-  - conda-forge::xlsxwriter>=3.0.3
+  - tar
+  - pandas
+  - xlsxwriter>=3.0.3
   - scikit-learn>=1.2.2
   - numpy
   - r-ggplot2

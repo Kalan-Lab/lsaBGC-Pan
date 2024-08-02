@@ -138,13 +138,15 @@ def create_parser():
 	parser.add_argument('-ci', '--cluster-inflation', type=float, help='The MCL inflation parameter for clustering BGCs into GCFs [Default is 0.8].', required=False, default=0.8)
 	parser.add_argument('-cj', '--cluster-jaccard', type=float, help="Cutoff for Jaccard similarity of homolog groups shared between two BGCs [Default is 50.0].", required=False, default=50.0)
 	parser.add_argument('-cr', '--cluster-syntenic-correlation', type=float, help='The minimal correlation coefficient needed between for considering them as a pair prior to MCL [Default is 0.4].', required=False, default=0.4)
+	parser.add_argument('-cc', '--cluster-containment', type=float, help="Cutoff for percentage of OGs for a gene cluster near a contig edge to be found within the comparing gene cluster for the pair to be considered in MCL (a minimum of 3 OGs shared are still required) [Default is 70.0]", required=False, default=70.0)
 
 	parser.add_argument('-nb', '--no-break', action='store_true', help='No break after step 5 to assess GCF clustering and population stratification.', required=False, default=False)
 
 	parser.add_argument('-zp', '--zol-parameters', help="The parameters to run zol analyses with - please surround by quotes [Defaut is \"\"].", default="")
 	parser.add_argument('-zhq', '--zol-high-quality-preset', action='store_true', help='Use preset of options for performing high-quality and comprehensive zol analyses instead of prioritizing speed.')
 	parser.add_argument('-zl', '--zol-keep-multi-copy', action='store_true', help='Include all GCF instances in zol analysis, not just the most representative instance from each sample/genome.', required=False, default=False)
-	parser.add_argument('-ed', '--zol-edge-distance', type=int, help="Distance in bp to scaffold/contig edge to be considered potentially fragmented [Default is 5000].", required=False, default=5000)
+	
+	parser.add_argument('-ed', '--edge-distance', type=int, help="Distance in bp to scaffold/contig edge to be considered potentially fragmented. Used in GCF clustering (related to --cluster-containment parameter) and zol conservation computations [Default is 5000].", required=False, default=5000)
 	# considering adding future argument for focal population definition in zol based on ID determined by popstrat
 
 	parser.add_argument('-hqr', '--high-quality-reconcile', action='store_true', help="Perform high-quality alignment for reconcile analysis.", required=False, default=False)
@@ -189,6 +191,7 @@ def lsaBGC():
 	cluster_inflation_param = myargs.cluster_inflation 
 	cluster_jaccard_param = myargs.cluster_jaccard
 	cluster_syntenic_correlation = myargs.cluster_syntenic_correlation
+	cluster_containmment = myargs.cluster_containment
 
 	high_quality_phylogeny_flag = myargs.high_quality_phylogeny
 	phylogeny_core_proportion = myargs.core_proportion
@@ -303,7 +306,6 @@ def lsaBGC():
 	logObject.info(msg)
 
 	genbank_recreate_dir = outdir + 'Recreated_GenBanks_with_LocusTags/'
-	all_genome_genbank_listing_file = outdir + 'Listing_of_Annotated_Genomes_in_GenBank_Format.txt'
 	detailed_BGC_listing_file = outdir + 'Detailed_BGC_Listing.txt'
 	simple_BGC_listing_file = outdir + 'Simple_BGC_Listing.txt'
 	genome_wide_listing_file = outdir  + 'Sample_GenBank_Files.txt'
@@ -546,7 +548,7 @@ is preferred, users can issue the --keep_locus_tags option.
 					bgc_file, sample, scaff, start_coord, end_coord, bgc_length, dist_to_edge, prediction_software = bgc_info
 					bgc_type = 'NA'
 					if prediction_software.upper() == "ANTISMASH":
-						bgc_type = util.parseAntiSMASHGBKForFunction(bgc_file, logObject)
+						bgc_type = util.parseAntiSMASHGBKForFunction(bgc_file, logObject, compress_multi=False)
 					else:
 						bgc_type = util.parseGECCOGBKForFunction(bgc_file, logObject)
 					ap = 0
@@ -562,7 +564,7 @@ is preferred, users can issue the --keep_locus_tags option.
 						continue
 					bgc_id = '.gbk'.join(bgc_file.split('/')[-1].split('.gbk')[:-1])
 					dblf_handle.write('\t'.join([str(x) for x in [sample, prediction_software, sample_genomes[sample], bgc_id, bgc_file, bgc_type, scaff, start_coord, end_coord, bgc_length, dist_to_edge]]) + '\n')
-					sblf_handle.write('\t'.join([sample, bgc_file, prediction_software]) + '\n')
+					sblf_handle.write('\t'.join([sample, bgc_file, prediction_software, str(dist_to_edge)]) + '\n')
 		else:
 			gene_call_dir = outdir + 'Gene_Calling/'
 
@@ -664,7 +666,7 @@ is preferred, users can issue the --keep_locus_tags option.
 				bgc_file, sample, scaff, start_coord, end_coord, bgc_length, dist_to_edge, prediction_software = bgc_info
 				bgc_type = 'NA'
 				if prediction_software.upper() == "ANTISMASH":
-					bgc_type = util.parseAntiSMASHGBKForFunction(bgc_gbk, logObject)
+					bgc_type = util.parseAntiSMASHGBKForFunction(bgc_gbk, logObject, compress_multi=False)
 				else:
 					bgc_type = util.parseGECCOGBKForFunction(bgc_file, logObject)
 				ap = 0
@@ -680,7 +682,7 @@ is preferred, users can issue the --keep_locus_tags option.
 					continue
 				bgc_id = '.gbk'.join(bgc_file.split('/')[-1].split('.gbk')[:-1])
 				dblf_handle.write('\t'.join([str(x) for x in [sample, prediction_software, sample_genomes[sample], bgc_id, bgc_file, bgc_type, scaff, start_coord, end_coord, bgc_length, dist_to_edge]]) + '\n')
-				sblf_handle.write('\t'.join([sample, bgc_file, prediction_software]) + '\n')
+				sblf_handle.write('\t'.join([sample, bgc_file, prediction_software, str(dist_to_edge)]) + '\n')
 
 		gwlf_handle.close()
 		sblf_handle.close()
@@ -822,7 +824,8 @@ is preferred, users can issue the --keep_locus_tags option.
 	gcf_listing_dir = cluster_results_dir + 'GCF_Listings/'
 	lsabgc_cluster_cmd = ['lsaBGC-Cluster', '-b', simple_BGC_listing_file, '-m', ortholog_matrix_file,
                           '-c', str(threads), '-o', cluster_results_dir, '-r', str(cluster_syntenic_correlation),
-                          '-i', str(cluster_inflation_param), '-j', str(cluster_jaccard_param), '-t']
+                          '-dc', str(zol_edge_distance), '-i', str(cluster_inflation_param), 
+						  '-s', str(), '-j', str(cluster_jaccard_param), '-t']
  
 	util.runCmdViaSubprocess(lsabgc_cluster_cmd, logObject=logObject, check_directories=[gcf_listing_dir], check_files=[cluster_pair_file])
 

@@ -32,6 +32,7 @@ class Pan:
 		self.bgc_info = {}
 		self.bgc_gbk = {}
 		self.bgc_genes = {}
+		self.bgc_edgy = {}
 		self.pan_genes = set([])
 		self.bgc_sample = {}
 		self.sample_bgcs = defaultdict(set)
@@ -52,14 +53,8 @@ class Pan:
 		self.pairwise_relations = None
 		# Absolute pearson correlation coefficient for syntenic similarity between bgcs
 		self.pairwise_syntenic_relations = None
-		# Concatenated HMMER3 HMM profiles database of homolog groups in GCF
-		self.concatenated_profile_HMM = None
-		# Consensus sequence in fasta format of concatentated profile HMM file
-		self.consensus_sequence_HMM = None
-		self.consensus_sequence_HMM_db = None
-		self.hg_max_self_evalue = defaultdict(lambda: [100000.0, False])
-		self.lowerbound_hg_count = 100000
-		self.hg_differentiation_stats = {}
+		# Containment relations between bgcs
+		self.pairwise_containment_relations = None
 
 		# variables containing location of files
 		self.final_stats_file = None
@@ -67,7 +62,7 @@ class Pan:
 		self.pair_relations_txt_file = None
 		self.bgc_to_gcf_map_file = None
 
-	def readInBGCGenbanks(self, comprehensive_parsing=True, prune_set=None):
+	def readInBGCGenbanks(self, comprehensive_parsing=True, prune_set=None, edge_dist_cutoff=5000):
 		"""
 		Function to parse file listing location of BGC Genbanks.
 
@@ -87,10 +82,16 @@ class Pan:
 					sys.stderr.write(msg + '\n')
 					sys.exit(1)
 
-				sample, gbk, prediction_method = line.split('\t')
+				sample, gbk, prediction_method, dist_to_edge = line.split('\t')
+
 				if prune_set != None and not sample in prune_set: continue
 				sample = util.cleanUpSampleName(sample)
 				try:
+					dist_to_edge = float(dist_to_edge)
+					edgy_bgc = False
+					if dist_to_edge <= edge_dist_cutoff:
+						edgy_bgc = True
+					
 					if prune_set != None and not sample in prune_set: continue
 					assert (util.is_genbank(gbk))
 					bgc_id = sample
@@ -115,6 +116,7 @@ class Pan:
 					self.sample_bgcs[sample].add(bgc_id)
 					self.bgc_product[bgc_id] = [x['product'] for x in BGC_Object.cluster_information]
 					self.bgc_core_counts[bgc_id] = BGC_Object.cluster_information[0]['count_core_gene_groups']
+					self.bgc_edgy[bgc_id] = edgy_bgc
 
 					if self.logObject:
 						self.logObject.info("Incorporating genbank %s for sample %s into analysis." % (gbk, sample))
@@ -210,6 +212,7 @@ class Pan:
 			prf_handle = open(pair_relations_txt_file, 'w')
 
 			pairwise_relations = defaultdict(lambda: defaultdict(float))
+			pairwise_containment_relations = defaultdict(lambda: defaultdict(float))
 			pairwise_syntenic_relations = defaultdict(lambda: defaultdict(lambda: 0.0))
 
 			bgc_hg_ranked_orders = defaultdict(dict)
@@ -241,6 +244,11 @@ class Pan:
 						pairwise_relations[bgc1][bgc2] = overlap_metric_scaled
 						pairwise_relations[bgc2][bgc1] = overlap_metric_scaled
 
+						bgc1_containment_in_bgc2 = (float(len(bgc1_hgs.intersection(bgc2_hgs))) / float(len(bgc1_hgs)))*100.0
+						bgc2_containment_in_bgc1 = (float(len(bgc1_hgs.intersection(bgc2_hgs))) / float(len(bgc2_hgs)))*100.0
+						pairwise_containment_relations[bgc1][bgc2] = bgc1_containment_in_bgc2
+						pairwise_containment_relations[bgc2][bgc1] = bgc2_containment_in_bgc1
+
 						sc_hgs_intersect = set(bgc1_hgs_ranked_orders.keys()).intersection(set(bgc2_hgs_ranked_orders.keys()))
 						if len(sc_hgs_intersect) >= 3:
 							bgc1_orders = []
@@ -262,6 +270,7 @@ class Pan:
 			if self.logObject:
 				self.logObject.info("Calculated pairwise relations and wrote to: %s" % pair_relations_txt_file)
 			self.pairwise_relations = pairwise_relations
+			self.pairwise_containment_relations = pairwise_containment_relations
 			self.pairwise_syntenic_relations = pairwise_syntenic_relations
 			self.pair_relations_txt_file = pair_relations_txt_file
 			self.bgc_to_gcf_map_file = outdir + 'BGC_to_GCF_Mapping.txt'
@@ -271,7 +280,7 @@ class Pan:
 				self.logObject.error(traceback.format_exc())
 			raise RuntimeError(traceback.format_exc())
 
-	def runMCLAndReportGCFs(self, mip, jcp, sccp, outdir, run_parameter_tests=False, threads=1):
+	def runMCLAndReportGCFs(self, mip, jcp, sccp, ccp, outdir, run_parameter_tests=False, threads=1):
 		"""
 		Function to run MCL and report the GCFs (gene-cluster families) of homologous BGCs identified.
 
@@ -288,8 +297,13 @@ class Pan:
 				for line in oprtf:
 					line = line.strip('\n')
 					b1, b2, jaccard_sim = line.split('\t')
-					if float(jaccard_sim) >= jcp and self.pairwise_syntenic_relations[b1][b2] >= sccp:
-						prftf_handle.write(line + '\n')
+					if self.pairwise_containment_relations[b1][b2] >= sccp:
+						if float(jaccard_sim) >= jcp:
+							prftf_handle.write(line + '\n')
+						elif self.bgc_edgy[b1] == True and self.pairwise_containment_relations[b1][b2] >= ccp:
+							prftf_handle.write(line + '\n')
+						elif self.bgc_edgy[b2] == True and self.pairwise_containment_relations[b2][b1] >= ccp:
+							prftf_handle.write(line + '\n')
 			prftf_handle.close()
 		except Exception as e:
 			if self.logObject:

@@ -1,4 +1,5 @@
-If you use lsaBGC-Pan, please cite: 
+If you use lsaBGC-Pan, please cite the original lsaBGC study: 
+https://www.microbiologyresearch.org/content/journal/mgen/10.1099/mgen.0.000988
 
 lsaBGC-Pan is made possible by many other tools including:
 - BGC prediction software (can vary but please cite appropriately):
@@ -24,7 +25,7 @@ lsaBGC-Pan is made possible by many other tools including:
     - cowplot: https://wilkelab.org/cowplot/articles/plot_grid.html
     - iTol: https://pubmed.ncbi.nlm.nih.gov/30931475/
 
-- eGCF clustering and population-genetics analysis:
+- GCF clustering and population-genetics analysis:
     - zol: https://www.biorxiv.org/content/10.1101/2023.06.07.544063v2
     - DIAMOND: https://www.nature.com/articles/nmeth.3176
     - MUSCLE5: https://www.nature.com/articles/s41467-022-34630-w
