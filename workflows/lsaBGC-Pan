@@ -201,7 +201,7 @@ def lsaBGC():
 
 	zol_parameters = myargs.zol_parameters
 	zol_high_quality_preset = myargs.zol_high_quality_preset
-	zol_edge_distance = myargs.zol_edge_distance
+	zol_edge_distance = myargs.edge_distance
 	zol_keep_multi_copy = myargs.zol_keep_multi_copy
 	
 	threads = myargs.threads
