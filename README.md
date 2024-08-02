@@ -16,7 +16,7 @@ The workflow has been tested to work with both bacterial and fungal genomes, but
 
 ### Documentation:
 
-Documentation and three separate tutorial showing application to:
+Documentation and three separate tutorials showing application to:
 
 * A small set of 7 *Cutibacterium avidum* and *Cutibacterium acnes* genomes (test dataset included with repo)
 * A set of 12 *Aspergillus flavus* genomes (fungal showcase)
@@ -26,19 +26,19 @@ can be found on the wiki at: https://github.com/Kalan-Lab/lsaBGC-Pan/wiki
 
 ### Example Commands:
 
-Perform analysis using a directory of AntiSMASH Results as input:
+Perform analysis using a directory of AntiSMASH results as input:
 
 ```bash
 lsaBGC-Pan -a AntiSMASH_Results/ -o Pan_Results/ -c 10
 ```
 
-Provide a directory of AntiSMASH Results as input and incorporate GECCO BGC predictions as well:
+Provide a directory of AntiSMASH results as input and incorporate GECCO BGC predictions as well:
 
 ```bash
 lsaBGC-Pan -a AntiSMASH_Results/ -o Pan_Results/ -c 10 -rg
 ```
 
-Provide a directory of genomes in FASTA format for GECCO-based BGC predictions and analysis: 
+Provide a directory of genomes in FASTA format for GECCO-based BGC predictions and analysis (only works for bacteria): 
 
 ```bash
 lsaBGC-Pan -g Directory_of_Genomes_in_FASTA/ -o Pan_Results/ -c 10
