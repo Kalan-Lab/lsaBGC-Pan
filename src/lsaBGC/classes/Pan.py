@@ -73,7 +73,7 @@ class Pan:
 			for i, line in enumerate(obsf):
 				line = line.strip()
 				try:
-					assert (len(line.split('\t')) == 3)
+					assert (len(line.split('\t')) == 4)
 				except Exception as e:
 					msg = "More or less than three columns exist at line %d in BGC specification/listing file. Exiting now ..." % (i + 1)
 					if self.logObject:
