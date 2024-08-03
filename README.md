@@ -11,12 +11,17 @@
 ### Key Highlights:
 
 ✔️ Works for both fungi & bacteria
+
 ✔️ Allows for joint analysis of antiSMASH & GECCO BGC predictions (in analysis of Streptomyces olivaceus - this leads to a 30% increase
+
 ✔️ Better consideration for incomplete BGCs due to assembly fragmentation
+
 ✔️ New analytical features:
     - including genome-wide association testing of orthogroups with GCF co-occurence
     - improved assessment of horizontal transfer for BGC-associated orthogroups
+
 ✔️ Improved consolidated spreadsheet that is easier to assess
+
 ✔️ Tested Bioconda installation on both macOS & Linux
 
 ### Manuscript:
