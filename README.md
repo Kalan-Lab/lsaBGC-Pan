@@ -12,7 +12,7 @@
 
 ✔️ Works for both fungi & bacteria
 
-✔️ Allows for joint analysis of antiSMASH & GECCO BGC predictions (in analysis of Streptomyces olivaceus - this leads to a 30% increase
+✔️ Allows for joint analysis of antiSMASH & GECCO BGC predictions (in analysis of Streptomyces olivaceus - this leads to a % increase in distinct GCFs to using antiSMASH alone)
 
 ✔️ Better consideration for incomplete BGCs due to assembly fragmentation
 
