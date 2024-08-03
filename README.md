@@ -2,13 +2,22 @@
 
 ### *lsa*BGC-Pan - *mine the pan-BGC-ome of a microbial taxon for biosynthetic golden nuggets.*
 
-*lsa*BGC-Pan reconfigures [*lsa*BGC](https://github.com/Kalan-Lab/lsaBGC) for easier installation via either Bioconda or Docker (_in progress_) and features a new workflow bearing the same name as the repo. In addition to easier usability, there are some new analytical modules -e.g. (de-)association testing of BGC ortholog groups and GCFs and an improved framework for inferring horizontal transfer. Another important new feature is the ability for joint analysis of both AntiSMASH and GECCO BGC predictions for a set of samples/genomes. 
-
-The workflow has been tested to work with both bacterial and fungal genomes, but if you stumble on a bug/unexpected-error please open a GitHub issue and let us know!
+*lsa*BGC-Pan reconfigures [*lsa*BGC](https://github.com/Kalan-Lab/lsaBGC) for easier installation via either Bioconda or Docker (_in progress_) and features a new workflow bearing the same name as the repo. In addition to easier usability, there are some new analytical modules -e.g. (de-)association testing of BGC ortholog groups and GCFs and an improved framework for inferring horizontal transfer. 
 
 <p align="center">
 <img src="https://github.com/Kalan-Lab/lsaBGC-Pan/assets/4260723/3aa3426e-39d6-4d25-91a3-44be288a6ad4" width="300">
 </p>
+
+### Key Highlights:
+
+✔️ Works for both fungi & bacteria
+✔️ Allows for joint analysis of antiSMASH & GECCO BGC predictions (in analysis of Streptomyces olivaceus - this leads to a 30% increase
+✔️ Better consideration for incomplete BGCs due to assembly fragmentation
+✔️ New analytical features:
+    - including genome-wide association testing of orthogroups with GCF co-occurence
+    - improved assessment of horizontal transfer for BGC-associated orthogroups
+✔️ Improved consolidated spreadsheet that is easier to assess
+✔️ Tested Bioconda installation on both macOS & Linux
 
 ### Manuscript:
 
