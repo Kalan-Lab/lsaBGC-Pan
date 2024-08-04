@@ -1,4 +1,8 @@
 # *lsa*BGC-Pan
+[![Manuscript](https://img.shields.io/badge/Manuscript-MGen-darkblue?style=flat-square&maxAge=2678400)](https://www.microbiologyresearch.org/content/journal/mgen/10.1099/mgen.0.000988)
+[![Documentation](https://img.shields.io/badge/Documentation-Wiki-darkgreen?style=flat-square&maxAge=2678400)](https://github.com/Kalan-Lab/lsaBGC-Pan/wiki)
+[![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/version.svg)](https://anaconda.org/bioconda/lsabgc)
+[![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/license.svg)](https://anaconda.org/bioconda/lsabgc)
 
 ### *lsa*BGC-Pan - *mine the pan-BGC-ome of a microbial taxon for biosynthetic golden nuggets.*
 
