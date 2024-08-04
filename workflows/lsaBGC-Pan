@@ -7,7 +7,7 @@
 
 # BSD 3-Clause License
 #
-# Copyright (c) 2024, Kalan-Lab
+# Copyright (c) 2021, Kalan-Lab
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -55,108 +55,104 @@ warnings.filterwarnings('ignore')
 def create_parser():
 	""" Parse arguments """
 	parser = argparse.ArgumentParser(description="""
-       __              ___   _____  _____
-      / /  ___ ___ _  / _ ) / ___/ / ___/
-     / /  (_-</ _ `/ / _  |/ (_ / / /__  
-    /_/  /___/\\_,_/ /____/ \\___/  \\___/  
-    **********************************************************************************************************
-    Program: lsaBGC-Pan
-    Author: Rauf Salamzade
-    Affiliation: Kalan Lab, UW Madison, Department of Medical Microbiology and Immunology
+	   __              ___   _____  _____
+	  / /  ___ ___ _  / _ ) / ___/ / ___/
+	 / /  (_-</ _ `/ / _  |/ (_ / / /__  
+	/_/  /___/\\_,_/ /____/ \\___/  \\___/  
+	*******************************************************************************************************************
+	Program: lsaBGC-Pan
+	Author: Rauf Salamzade
+	Affiliation: Kalan Lab, UW Madison, Department of Medical Microbiology and Immunology
 	
-    QUICK DESCRIPTION:
-    Workflow to run a pan-genome analysis of biosynthetic gene clusters for a single genus or species. 
-    https://github.com/Kalan-Lab/lsaBGC-Pan/
+	QUICK DESCRIPTION:
+	Workflow to run a pan-genome analysis of biosynthetic gene clusters for a single genus or species. 
+	https://github.com/Kalan-Lab/lsaBGC-Pan/
 		
-    **********************************************************************************************************
-    NOTES & CONSIDERATIONS:	
-
-    * Check out the documentation at: https://github.com/Kalan-Lab/lsaBGC-Pan/wiki 	
-    * Either provide an antiSMASH results directory or a directory with genomes (not both!).
-    * lsaBGC-Pan does not have all the  functionalities of the original lsaBGC suite to make things simpler 
-      and more straightforward. In particular, lsaBGC-(Auto)Expansion, which helped with scalability is 
-      discluded because its usage generally requires more careful consideration and manual curation. Thus, to 
-      make sure your analysis runs in a relatively timely manner, the program is restricted to handling data 
-      from 4-200 genomes.
-          - Consider using tools for dereplication/strain-clustering (such as skDER/CiDDER, dRep, PopPunk, 
-            or treemmer) to prune down your set of genomes if you have more than 200.
-    * Panaroo should only be used if working with genomes belonging to a single bacterial species. If working 
-      with multiple bacterial species or fungal genomes, please use OrthoFinder instead.
-    * Specifying fungal mode makes sure OrthoFinder is being used and that antiSMASH results were provided. 
-      GECCO is not designed for fungal genomes. In addition, customized processing designed for bacterial 
-      genomics is not performed and a more direct extraction of hierarchical orthogroups is applied.
-    **********************************************************************************************************
-    OVERVIEW OF WORKFLOW STEPS:	
-	
-    PART 1
-    ----------------------------------------------------------------------------------------------------------
-        - Step 1: Assess inputs provided
-        - Step 1a: If genomes are provided, perform gene-calling with p(y)rodigal and annotate BGCs with GECCO
-        - Step 1b: If antiSMASH results are provided, extracted genes from full genome GenBank files. If GECCO 
-                   is requested, then it will also be run and overlapping GECCO and antiSMASH BGC regions will 
-                   be consolidated by taking
-                   the larger region. 
-        - Step 2: Run OrthoFinder/Panaroo for orthology inference.
-        - Step 3: Create species tree/phyogeny from (near-) core ortholog groups.
-        - Step 4: Infer populations (will do so at multiple "core AAI" cutoffs) [no checkpoint, always rerun].
-        - Step 5: Run lsaBGC-Cluster.py to determine evolutionary GCFs (by default in testing mode unless 
-                  --auto-cluster specified) [no checkpoint, always rerun].
+	*******************************************************************************************************************
+	NOTES & CONSIDERATIONS:	
+	* Check out the documentation at: https://github.com/Kalan-Lab/lsaBGC-Pan/wiki 	
+	* Either provide an antiSMASH results directory or a directory with genomes (not both!).
+	* lsaBGC-Pan does not have all the  functionalities of the original lsaBGC suite to make things simpler and more 
+          straightforward. In particular, lsaBGC-(Auto)Expansion, which helped with scalability is discluded because its 
+          usage generally requires more careful consideration and manual curation. Thus, to make sure your analysis runs 
+          in a relatively timely manner, the program is restricted to handling data from 4-200 genomes.
+		- Consider using tools for dereplication/strain-clustering (such as skDER/CiDDER, dRep, PopPunk, or 
+                  treemmer) to prune down your set of genomes if you have more than 200.
+	* Panaroo should only be used if working with genomes belonging to a single bacterial species. If working with 
+	  multiple bacterial species or fungal genomes, please use OrthoFinder instead.
+	* Specifying fungal mode makes sure OrthoFinder is being used and that antiSMASH results were provided. GECCO is 
+          not designed for fungal genomes. In addition, customized processing designed for bacterial genomics is not 
+          performed and a more direct extraction of hierarchical orthogroups is applied.
+	*******************************************************************************************************************
+	OVERVIEW OF WORKFLOW STEPS:	
+		PART 1
+		------
+		- Step 1: Assess inputs provided
+		- Step 1a: If genomes are provided, perform gene-calling with p(y)rodigal and annotate BGCs with GECCO
+		- Step 1b: If antiSMASH results are provided, extracted genes from full genome GenBank files. If GECCO is requested,
+				   then it will also be run and overlapping GECCO and antiSMASH BGC regions will be consolidated by taking
+				   the larger region. 
+		- Step 2: Run OrthoFinder/Panaroo for orthology inference.
+		- Step 3: Create species tree/phyogeny from (near-) core ortholog groups.
+		- Step 4: Infer populations (will do so at multiple "core AAI" cutoffs) [no checkpoint, always rerun].
+		- Step 5: Run lsaBGC-Cluster.py to determine evolutionary GCFs (by default in testing mode unless 
+				  --auto-cluster specified) [no checkpoint, always rerun].
 		
-    BREAK (optional - but recommended - can be skipped by issuing --no-break)
-    ----------------------------------------------------------------------------------------------------------
-        - Step 6a: Manually examine which parameters make the most sense for evolutionary clustering of GCFs. 
-                   Restart the workflow after with parameters for gene cluster clustering adapted.
-        - Step 6b: Manually assess how population designations structure along the species tree with different 
-                   core AAI cutoffs and, if desired, adjust population designations.							  
+		BREAK (optional - but recommended - can be skipped by issuing --no-break)
+		---------------------------		
+		- Step 6a: Manually examine which parameters make the most sense for evolutionary clustering of GCFs. Restart 
+				   the workflow after with parameters for gene cluster clustering adapted.
+		- Step 6b: Manually assess how population designations structure along the species tree with different core AAI
+				   cutoffs and, if desired, adjust population designations.							  
 
-    PART 2
-    ----------------------------------------------------------------------------------------------------------
-        - Step 7: Parallel running of zol (twice with and without the -ace option) per GCF.
-        - Step 8: Parallel running of GSeeF, lsaBGC-See, and lsaBGC-ComprehenSeeIve per GCF.
-        - Step 9: Parallel running of lsaBGC-MIBiGMapper.
-        - Step 10: Parallel running of lsaBGC-Reconcile and lsaBGC-Sociate.
-        - Step 11: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate 
-                   results [no checkpoint, always rerun].
-    **********************************************************************************************************
+		PART 2
+		------
+		- Step 7: Parallel running of zol (twice with and without the -ace option) per GCF.
+		- Step 8: Parallel running of GSeeF, lsaBGC-See, and lsaBGC-ComprehenSeeIve per GCF.
+		- Step 9: Parallel running of lsaBGC-MIBiGMapper.
+		- Step 10: Parallel running of lsaBGC-Reconcile and lsaBGC-Sociate.
+		- Step 11: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate 
+				   results [no checkpoint, always rerun].
+	*******************************************************************************************************************
 	""", formatter_class=argparse.RawTextHelpFormatter)
 
-	parser.add_argument('-a', '--antismash-results-directory', help="A directory with subdirectories corresponding to antiSMASH results\nper sample/genome [Optional].", required=False, default=None)
-	parser.add_argument('-g', '--genomes-directory', help="A directory with additional genomes, e.g. those recently\nsequenced by the user, belonging to the taxa. Accepted formats\ninclude FASTA. Accepted suffices include: .fna, .fa, .fasta.\nWill run GECCO for\nBGC-predictions [Optional].", required=False, default=None)
+	parser.add_argument('-a', '--antismash-results-directory', help="A directory with subdirectories corresponding to antiSMASH results per sample/genome [Optional].", required=False, default=None)
+	parser.add_argument('-g', '--genomes-directory', help="A directory with additional genomes, e.g. those recently sequenced by the\nuser, belonging to the taxa. Accepted formats include FASTA.\nAccepted suffices include: .fna, .fa, .fasta. Will run GECCO for BGC-predictions [Optional].", required=False, default=None)
 	parser.add_argument('-o', '--output-directory', help="Parent output/workspace directory.", required=True)
 
-	parser.add_argument('-f', '--fungal', action='store_true', help="Specify if input are from fungal genomes. Only possible\nif antiSMASH results are provided.", required=False, default=False)
+	parser.add_argument('-f', '--fungal', action='store_true', help="Specify if input are from fungal genomes. Only possible if antiSMASH results are provided.", required=False, default=False)
 	parser.add_argument('-k', '--keep-locus-tags', action='store_true', help="Keep original locus tags in antiSMASH GenBank files.", required=False, default=False)
-	parser.add_argument('-rg', '--run-gecco', action='store_true', help="If antiSMASH results are provided also run GECCO for\nannotation of BGCs.", required=False, default=False)
+	parser.add_argument('-rg', '--run-gecco', action='store_true', help="If antiSMASH results are provided also run GECCO for annotation of BGCs.", required=False, default=False)
 
-	parser.add_argument('-up', '--use-panaroo', action='store_true', help='Use Panaroo instead of OrthoFinder for orthology inference.\nRecommended if investigating a single bacterial species.', default=False, required=False)
-	parser.add_argument('-omc', '--run-coarse-orthofinder', action='store_true', help='Use coarse clustering for orthogroups in OrthoFinder instead\nof the more resolute hierarchical determined homolog groups.\nThere are some advantages to coarse OGs, including their\nconstruction being deterministic.', required=False, default=False)
-	parser.add_argument('-ohq', '--run-msa-orthofinder', action='store_true', help='Run OrthoFinder using multiple sequence alignments instead of\nDendroBlast to determine hierarchical ortholog groups.', required=False, default=False)
+	parser.add_argument('-up', '--use-panaroo', action='store_true', help='Use Panaroo instead of OrthoFinder for orthology inference. Recommended if investigating a single bacterial species.', default=False, required=False)
+	parser.add_argument('-omc', '--run-coarse-orthofinder', action='store_true', help='Use coarse clustering for orthogroups in OrthoFinder instead of the more\nresolute hierarchical determined homolog groups. There are some advantages to coarse\nOGs, including their construction being deterministic.', required=False, default=False)
+	parser.add_argument('-ohq', '--run-msa-orthofinder', action='store_true', help='Run OrthoFinder using multiple sequence alignments instead of DendroBlast to determine hierarchical ortholog groups.', required=False, default=False)
 
 	parser.add_argument('-hqp', '--high-quality-phylogeny', action='store_true', help='Prioritize quality over speed for phylogeny construction.', required=False, default=False)
-	parser.add_argument('-cs', '--core-proportion', type=float, help='What proportion of genomes single-copy orthogroups need to be\nfound in to be used for species tree construction [Default is 0.9].', required=False, default=0.90)
-	parser.add_argument('-mcs', '--max-core-genes', type=int, help="The maximum number of single copy (near-)core orthogroups to\nuse [Default is 500].", required=False, default=500)
+	parser.add_argument('-cs', '--core-proportion', type=float, help='What proportion of genomes single-copy orthogroups need to be found in to be used for species tree construction [Default is 0.9].', required=False, default=0.90)
+	parser.add_argument('-mcs', '--max-core-genes', type=int, help="The maximum number of single copy (near-)core orthogroups to use [Default is 500].", required=False, default=500)
 
-	parser.add_argument('-pic', '--population-identity-cutoff', type=float, help='The core-genome identity cutoff used to define pairs of genomes as\nbelonging to the same group/population [Default is 99.0].', required=False, default=99.0)
-	parser.add_argument('-mpf', '--manual-populations-file', help="Tab delimited file for manual mapping of samples to different\npopulations/clades.", required=False, default=None)
+	parser.add_argument('-pic', '--population-identity-cutoff', type=float, help='The core-genome identity cutoff used to define pairs of genomes as belonging to the same group/population [Default is 99.0].', required=False, default=99.0)
+	parser.add_argument('-mpf', '--manual-populations-file', help="Tab delimited file for manual mapping of samples to different populations/clades.", required=False, default=None)
 
-	parser.add_argument('-ci', '--cluster-inflation', type=float, help='The MCL inflation parameter for clustering BGCs into GCFs [Default\nis 0.8].', required=False, default=0.8)
-	parser.add_argument('-cj', '--cluster-jaccard', type=float, help="Cutoff for Jaccard similarity of homolog groups shared between two\nBGCs [Default is 50.0].", required=False, default=50.0)
-	parser.add_argument('-cr', '--cluster-syntenic-correlation', type=float, help='The minimal correlation coefficient needed between for considering them\nas a pair prior to MCL [Default is 0.4].', required=False, default=0.4)
-	parser.add_argument('-cc', '--cluster-containment', type=float, help="Cutoff for percentage of OGs for a gene cluster near a contig edge\nto be found within the comparing gene cluster for the pair to be\nconsidered in MCL (a minimum of 3 OGs shared are still required) [Default\nis 70.0]", required=False, default=70.0)
+	parser.add_argument('-ci', '--cluster-inflation', type=float, help='The MCL inflation parameter for clustering BGCs into GCFs [Default is 0.8].', required=False, default=0.8)
+	parser.add_argument('-cj', '--cluster-jaccard', type=float, help="Cutoff for Jaccard similarity of homolog groups shared between two BGCs [Default is 50.0].", required=False, default=50.0)
+	parser.add_argument('-cr', '--cluster-syntenic-correlation', type=float, help='The minimal correlation coefficient needed between for considering them as a pair prior to MCL [Default is 0.4].', required=False, default=0.4)
+	parser.add_argument('-cc', '--cluster-containment', type=float, help="Cutoff for percentage of OGs for a gene cluster near a contig edge to be found within the comparing gene cluster for the pair to be considered in MCL (a minimum of 3 OGs shared are still required) [Default is 70.0]", required=False, default=70.0)
 
-	parser.add_argument('-nb', '--no-break', action='store_true', help='No break after step 5 to assess GCF clustering and population\nstratification and adapt parameters.', required=False, default=False)
+	parser.add_argument('-nb', '--no-break', action='store_true', help='No break after step 5 to assess GCF clustering and population stratification.', required=False, default=False)
 
-	parser.add_argument('-zp', '--zol-parameters', help="The parameters to run zol analyses with - please surround by quotes\n[Defaut is \"\"].", default="")
-	parser.add_argument('-zhq', '--zol-high-quality-preset', action='store_true', help='Use preset of options for performing high-quality and comprehensive zol\nanalyses instead of prioritizing speed.')
-	parser.add_argument('-zl', '--zol-keep-multi-copy', action='store_true', help='Include all GCF instances in zol analysis, not just the most\nrepresentative instance from each sample/genome.', required=False, default=False)
+	parser.add_argument('-zp', '--zol-parameters', help="The parameters to run zol analyses with - please surround by quotes [Defaut is \"\"].", default="")
+	parser.add_argument('-zhq', '--zol-high-quality-preset', action='store_true', help='Use preset of options for performing high-quality and comprehensive zol analyses instead of prioritizing speed.')
+	parser.add_argument('-zl', '--zol-keep-multi-copy', action='store_true', help='Include all GCF instances in zol analysis, not just the most representative instance from each sample/genome.', required=False, default=False)
 	
-	parser.add_argument('-ed', '--edge-distance', type=int, help="Distance in bp to scaffold/contig edge to be considered potentially\nfragmented. Used in GCF clustering (related to --cluster-containment\nparameter) and zol conservation computations [Default is 5000].", required=False, default=5000)
+	parser.add_argument('-ed', '--edge-distance', type=int, help="Distance in bp to scaffold/contig edge to be considered potentially fragmented. Used in GCF clustering (related to --cluster-containment parameter) and zol conservation computations [Default is 5000].", required=False, default=5000)
 	# considering adding future argument for focal population definition in zol based on ID determined by popstrat
 
 	parser.add_argument('-hqr', '--high-quality-reconcile', action='store_true', help="Perform high-quality alignment for reconcile analysis.", required=False, default=False)
 
-	parser.add_argument('-py', '--use-prodigal', action='store_true', help='Use prodigal instead of pyrodigal (only if genomes are provided - not\nrelevant if antiSMASH results provided).', required=False, default=False)
-	parser.add_argument('-c', '--threads', type=int, help="Total number of threads/processes to use. Recommend inreasing as much\nas possible. [Default is 4].", required=False, default=4)
+	parser.add_argument('-py', '--use-prodigal', action='store_true', help='Use prodigal instead of pyrodigal (only if genomes are provided - not relevant if antiSMASH results provided).', required=False, default=False)
+	parser.add_argument('-c', '--threads', type=int, help="Total number of threads/processes to use. Recommend inreasing as much as possible. [Default is 4].", required=False, default=4)
 	parser.add_argument('-d', '--docker-mode', action='store_true', help=argparse.SUPPRESS, required=False, default=False)
 	
 	args = parser.parse_args()
@@ -205,7 +201,7 @@ def lsaBGC():
 
 	zol_parameters = myargs.zol_parameters
 	zol_high_quality_preset = myargs.zol_high_quality_preset
-	zol_edge_distance = myargs.edge_distance
+	zol_edge_distance = myargs.zol_edge_distance
 	zol_keep_multi_copy = myargs.zol_keep_multi_copy
 	
 	threads = myargs.threads
@@ -828,8 +824,8 @@ is preferred, users can issue the --keep_locus_tags option.
 	gcf_listing_dir = cluster_results_dir + 'GCF_Listings/'
 	lsabgc_cluster_cmd = ['lsaBGC-Cluster', '-b', simple_BGC_listing_file, '-m', ortholog_matrix_file,
                           '-c', str(threads), '-o', cluster_results_dir, '-r', str(cluster_syntenic_correlation),
-                          '-x', str(zol_edge_distance), '-i', str(cluster_inflation_param), 
-						  '-y', str(cluster_containmment), '-j', str(cluster_jaccard_param), '-t']
+                          '-dc', str(zol_edge_distance), '-i', str(cluster_inflation_param), 
+						  '-s', str(), '-j', str(cluster_jaccard_param), '-t']
  
 	util.runCmdViaSubprocess(lsabgc_cluster_cmd, logObject=logObject, check_directories=[gcf_listing_dir], check_files=[cluster_pair_file])
 
@@ -851,7 +847,7 @@ is preferred, users can issue the --keep_locus_tags option.
 		for i, line in enumerate(osblf):
 			line = line.strip()
 			try:
-				assert (len(line.split('\t')) == 4)
+				assert (len(line.split('\t')) == 3)
 			except Exception as e:
 				msg = "More or less than three columns exist at line %d in BGC specification/listing file. Exiting now ..." % (i + 1)
 				logObject.error(msg)
@@ -859,7 +855,7 @@ is preferred, users can issue the --keep_locus_tags option.
 				sys.stderr.write(msg + '\n')
 				sys.exit(1)
 
-			sample, bgc_gbk, _, _ = line.split('\t')
+			sample, bgc_gbk, _ = line.split('\t')
 			sample = util.cleanUpSampleName(sample)
 			assert (util.is_genbank(bgc_gbk))
 			bgc_id = sample
