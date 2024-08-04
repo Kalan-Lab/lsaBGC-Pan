@@ -24,7 +24,11 @@
 
 ✔️ Improved consolidated spreadsheet that is easier to assess
 
+✔️ Support for small scale (< 30 genomes) analysis on laptop with minimal databases (~5 GB).
+
 ✔️ Tested Bioconda installation on both macOS & Linux with easy-to-use Docker image & wrapper script coming soon!
+
+✔️ Bioconda installation tested on both macOS & Linux with easy-to-use Docker image & wrapper script also coming soon!
 
 ### Documentation:
 
