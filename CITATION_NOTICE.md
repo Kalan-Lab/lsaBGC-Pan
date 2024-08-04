@@ -37,5 +37,6 @@ lsaBGC-Pan is made possible by many other tools including:
     - KOfam HMMs: https://academic.oup.com/bioinformatics/article/36/7/2251/5631907
     - PGAP HMMs: https://pubmed.ncbi.nlm.nih.gov/27342282/
     - MIBiG DB: https://academic.oup.com/nar/article/51/D1/D603/6833236
+    - CARD: https://academic.oup.com/nar/article/51/D1/D690/6764414
     - Pfam DB: https://academic.oup.com/nar/article/49/D1/D412/5943818?login=false
     - ISFinder DB: https://academic.oup.com/nar/article/34/suppl_1/D32/1132247?login=false
