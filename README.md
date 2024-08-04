@@ -30,6 +30,8 @@
 
 ✔️ Bioconda installation tested on both macOS & Linux with easy-to-use Docker image & wrapper script also coming soon!
 
+✔️ BSD-3 License & no uploading of data to webservers = support for industry research
+
 ### Documentation:
 
 Documentation and three separate tutorials showing application to:
