@@ -173,7 +173,7 @@ def lsaBGC():
 *************************************"""
 		sys.stdout.write(logo + '\n\n')
 		sys.stdout.write('Running lsaBGC-Pan version %s\n' % version_string)
-		
+		sys.exit(0)
 
 	myargs = create_parser()
 
