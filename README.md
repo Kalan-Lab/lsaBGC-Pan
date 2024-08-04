@@ -8,25 +8,23 @@
 <img src="https://github.com/Kalan-Lab/lsaBGC-Pan/assets/4260723/3aa3426e-39d6-4d25-91a3-44be288a6ad4" width="300">
 </p>
 
+### Manuscript:
+
+> [Evolutionary investigations of the biosynthetic diversity in the skin microbiome using *lsa*BGC](https://www.microbiologyresearch.org/content/journal/mgen/10.1099/mgen.0.000988). *Microbial Genomics 2023.* Rauf Salamzade, J.Z. Alex Cheong, Shelby Sandstrom, Mary Hannah Swaney, Reed M. Stubbendieck, Nicole Lane Starr, Cameron R. Currie, Anne Marie Singh, and Lindsay R. Kalan
+
 ### Key Highlights:
 
 ✔️ Works for both fungi & bacteria
 
-✔️ Allows for joint analysis of antiSMASH & GECCO BGC predictions (in analysis of Streptomyces olivaceus - this leads to a % increase in distinct GCFs to using antiSMASH alone)
+✔️ Allows for joint analysis of antiSMASH & GECCO BGC predictions (in analysis of _Streptomyces olivaceus_ - this leads to a 42.4% increase in distinct GCFs to using antiSMASH alone)
 
 ✔️ Better consideration for incomplete BGCs due to assembly fragmentation
 
-✔️ New analytical features:
-    - including genome-wide association testing of orthogroups with GCF co-occurence
-    - improved assessment of horizontal transfer for BGC-associated orthogroups
+✔️ New analytical features including: (1) genome-wide association testing of orthogroups with GCF co-occurence & (2) improved assessment of horizontal transfer for BGC-associated orthogroups
 
 ✔️ Improved consolidated spreadsheet that is easier to assess
 
-✔️ Tested Bioconda installation on both macOS & Linux
-
-### Manuscript:
-
-> [Evolutionary investigations of the biosynthetic diversity in the skin microbiome using *lsa*BGC](https://www.microbiologyresearch.org/content/journal/mgen/10.1099/mgen.0.000988). *Microbial Genomics 2023.* Rauf Salamzade, J.Z. Alex Cheong, Shelby Sandstrom, Mary Hannah Swaney, Reed M. Stubbendieck, Nicole Lane Starr, Cameron R. Currie, Anne Marie Singh, and Lindsay R. Kalan
+✔️ Tested Bioconda installation on both macOS & Linux with easy-to-use Docker image & wrapper script coming soon!
 
 ### Documentation:
 
