@@ -888,7 +888,8 @@ of the PDF report showing the impact of parameters on clustering
 found at: %s 
 and PDF graphics of the species phylogeny with 
 different population divisions marked which can be found in the 
-directory %s. For more insight into how to select appropriate 
+directory %s. 
+For more insight into how to select appropriate 
 parameters, check out: 
 https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-during-midway-break
 		""" % (cluster_results_dir + '', popstrat_results_dir + '')

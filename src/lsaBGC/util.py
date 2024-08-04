@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import SeqFeature, FeatureLocation
@@ -1554,8 +1555,49 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 
 		# create MIBiG mapping spreadsheet
 
+		mibig_json_tar_url = 'https://dl.secondarymetabolites.org/mibig/mibig_json_3.1.tar.gz'
+		mibig_json_tar_dir = scratch_dir + 'mibig_json_3.1/'
+		mibig_json_tar_file = scratch_dir + 'mibig_json_3.1.tar.gz'
+
+		if not os.path.isdir(mibig_json_tar_dir):
+			if os.path.isfile(mibig_json_tar_file):
+				os.remove(mibig_json_tar_file)
+			wget_cmd = ['axel', mibig_json_tar_url, '-o', mibig_json_tar_file]
+
+			try:
+				subprocess.call(' '.join(wget_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, executable='/bin/bash')
+				assert (os.path.isfile(mibig_json_tar_file))
+			except:
+				sys.stderr.write('Had an issue running: %s\n' % ' '.join(wget_cmd))
+				sys.stderr.write(traceback.format_exc())
+				sys.exit(1)
+
+			uncompress_cmd = ['tar', '-zxvf', mibig_json_tar_file, '-C', scratch_dir]
+			try:
+				os.mkdir(mibig_json_tar_dir)
+				subprocess.call(' '.join(uncompress_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, executable='/bin/bash')
+				assert (os.path.isdir(mibig_json_tar_dir))
+			except:
+				sys.stderr.write('Had an issue running: %s\n' % ' '.join(uncompress_cmd))
+				sys.stderr.write(traceback.format_exc())
+				sys.exit(1)
+
+		mibig_bgc_compounds = defaultdict(list)
+		if os.path.isdir(mibig_json_tar_dir):
+			for f in os.listdir(mibig_json_tar_dir):
+				if not f.endswith('.json'): continue
+				bgc = f.split('.')[0]
+				json_bgc_file = mibig_json_tar_dir + f
+				with open(json_bgc_file) as json_data:
+					data = json.load(json_data)
+					for comp in data['cluster']['compounds']:
+						for key in comp:
+							if key == 'compound':
+								mibig_bgc_compounds[bgc].append(comp[key])
+
+
 		mb_combined_tsv_file = scratch_dir + 'mibig_map_results.tsv'
-		mb_header = ['GCF ID', 'MIBiG BGC ID', 'GCF OG ID', 'MIBiG Protein Matching']
+		mb_header = ['GCF ID', 'MIBiG BGC ID', 'GCF OG ID', 'MIBiG Protein Matching', 'MIBiG Compound(s)']
 		mb_outf = open(mb_combined_tsv_file, 'w')
 		mb_outf.write('\t'.join(mb_header) + '\n')
 		for gcf in os.listdir(mibig_dir):
@@ -1564,7 +1606,9 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			with open(map_file) as omf:
 				for i, line in enumerate(omf):
 					if i == 0: continue
-					mb_outf.write(line)
+					line = line.strip('\n')
+					ls = line.split('\t')
+					mb_outf.write('\t'.join(ls + [' | '.join(mibig_bgc_compounds[ls[1]])]) + '\n')
 		mb_outf.close()
 
 		mb_data = loadTableInPandaDataFrame(mb_combined_tsv_file, set([]))
