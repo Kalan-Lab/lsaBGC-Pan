@@ -1,6 +1,6 @@
-- switch to TOML instead of only setup.py
+Main:
+- add cgc to zol and as another output visualization
+- add phylo heatmap of associated features for each focal GCF found by lsaBGC-Sociate
+
+Other:
 - add/move zol-scape and refiner to zol
-
-REMINDER:
-
-- remember - it will take a while to set up the final spreadsheets.
