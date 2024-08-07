@@ -1,7 +1,7 @@
 [project]
 name = "lsaBGC-Pan"
 authors = [{name="Rauf Salamzade", email="salamzader@gmail.com"}]
-version = "1.0.5"
+version = "1.0.6"
 readme = "README.md"
 description = "lsaBGC-Pan: a workflow/suite for pan-BGC-ome analyses."
 

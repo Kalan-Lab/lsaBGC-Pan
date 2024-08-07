@@ -1,32 +1,19 @@
-import copy
 import os
-import sys
-import logging
 import traceback
 import statistics
 import random
 import subprocess
-import pysam
-import gzip
-import multiprocessing
-from scipy.stats import f_oneway, fisher_exact, pearsonr, median_abs_deviation, entropy
+import concurrent.futures
 from ete3 import Tree
-import numpy as np
 from operator import itemgetter
-import itertools
 from collections import defaultdict
 from lsaBGC.classes.Pan import Pan
 from lsaBGC import util
-from pandas import DataFrame
 from pomegranate import *
 import math
 import warnings
-import decimal
-from Bio import SeqIO, Align
-from Bio.Seq import Seq
-from Bio.SeqRecord import SeqRecord
-from Bio.codonalign.codonseq import CodonSeq, cal_dn_ds
-from lsaBGC.classes.BGC import BGC
+from Bio import SeqIO
+
 warnings.filterwarnings('ignore')
 
 SEED = 12345
@@ -641,10 +628,11 @@ class GCF(Pan):
 		if not os.path.isdir(prot_alg_dir): os.system('mkdir %s' % prot_alg_dir)
 		if not os.path.isdir(codo_alg_dir): os.system('mkdir %s' % codo_alg_dir)
 
-		pool_size = 1
-		if threads > 10:
-			pool_size = math.floor(threads / 10)
-			threads = 10
+		parallel_jobs_4thread = max(math.floor(threads / 4), 1)
+		multi_thread = 4
+		if threads < 4:
+			multi_thread = threads
+			parallel_jobs_4thread = 1
 
 		all_samples = set(self.bgc_sample.values())
 		try:
@@ -674,11 +662,11 @@ class GCF(Pan):
 				#if len([x for x in gene_sequences.keys() if len(x.split('|')[1].split('_')[0]) == 3]) == 0: continue
 				if filter_outliers:
 					gene_sequences = util.determineOutliersByGeneLength(gene_sequences, self.logObject)
-				inputs.append([hg, gene_sequences, nucl_seq_dir, prot_seq_dir, prot_alg_dir, codo_alg_dir, threads, use_ms5, self.logObject])
+				inputs.append([hg, gene_sequences, nucl_seq_dir, prot_seq_dir, prot_alg_dir, codo_alg_dir, multi_thread, use_ms5, self.logObject])
 
-			p = multiprocessing.Pool(pool_size)
-			p.map(create_codon_msas, inputs)
-
+			with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+				executor.map(create_codon_msas, inputs)
+			
 			if not filter_outliers:
 				self.nucl_seq_dir = nucl_seq_dir
 				self.prot_seq_dir = prot_seq_dir

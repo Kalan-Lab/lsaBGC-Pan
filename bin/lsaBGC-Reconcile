@@ -46,8 +46,8 @@ from Bio import SeqIO
 import multiprocessing
 import traceback
 import math
-from ete3 import Tree
 import statistics
+import concurrent.futures
 
 warnings.filterwarnings('ignore')
 
@@ -286,9 +286,8 @@ def lsaBGC_Reconcile():
         plot_inputs.append(plot_input)
 
     try:
-        p = multiprocessing.Pool(parallel_jobs_4thread)
-        p.map(util.multiProcessNoLog, muscle_cmds)
-        p.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+            executor.map(util.multiProcessNoLog, muscle_cmds)
     except Exception as e:
         msg = 'Issues running muscle in parallel!\n'
         sys.stderr.write(msg)
@@ -296,9 +295,8 @@ def lsaBGC_Reconcile():
         sys.exit(1)
 
     try:
-        p = multiprocessing.Pool(threads)
-        p.map(util.multiProcessNoLog, trimal_cmds)
-        p.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.map(util.multiProcessNoLog, trimal_cmds)
     except Exception as e:
         msg = 'Issues running trimal in parallel.\n'
         sys.stderr.write(msg)
@@ -306,9 +304,8 @@ def lsaBGC_Reconcile():
         sys.exit(1)
 
     try:
-        p = multiprocessing.Pool(threads)
-        p.map(util.multiProcessNoLog, fasttree_cmds)
-        p.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.map(util.multiProcessNoLog, fasttree_cmds)
     except Exception as e:
         msg = 'Issues running fasttree in parallel.\n'
         sys.stderr.write(msg)
@@ -316,9 +313,8 @@ def lsaBGC_Reconcile():
         sys.exit(1)
 
     try:
-        p = multiprocessing.Pool(threads)
-        p.map(runPlotting, plot_inputs)
-        p.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.map(util.multiProcessNoLog, plot_inputs)
     except Exception as e:
         msg = 'Issues creating plots.\n'
         sys.stderr.write(msg)

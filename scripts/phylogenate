@@ -43,7 +43,7 @@ import traceback
 from collections import defaultdict
 from Bio import SeqIO
 from time import sleep
-import multiprocessing
+import concurrent.futures
 import math
 import random
 
@@ -173,9 +173,8 @@ def phylogenate():
 		trimal_cmds.append(trimal_cmd)
 
 	try:
-		p = multiprocessing.Pool(parallel_jobs_4thread)
-		p.map(util.multiProcessNoLog, muscle_cmds)
-		p.close()
+		with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+			executor.map(util.multiProcessNoLog, muscle_cmds)
 	except Exception as e:
 		msg = 'Issues running muscle in parallel!\n'
 		sys.stderr.write(msg)
@@ -183,9 +182,8 @@ def phylogenate():
 		sys.exit(1)
 
 	try:
-		p = multiprocessing.Pool(threads)
-		p.map(util.multiProcessNoLog, trimal_cmds)
-		p.close()
+		with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+			executor.map(util.multiProcessNoLog, trimal_cmds)
 	except Exception as e:
 		msg = 'Issues running trimal in parallel.\n'
 		sys.stderr.write(msg)

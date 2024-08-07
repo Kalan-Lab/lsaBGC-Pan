@@ -44,8 +44,8 @@ import warnings
 import traceback
 from Bio import SeqIO
 from collections import defaultdict
-import multiprocessing
 import math
+import concurrent.futures
 
 warnings.filterwarnings('ignore')
 
@@ -285,9 +285,8 @@ def lsaBGC_Sociate():
         count_cmds.append(count_gcf_cmd)
 
     try:
-        p = multiprocessing.Pool(threads)
-        p.map(util.multiProcessNoLog, pyseer_cmds)
-        p.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.map(util.multiProcessNoLog, pyseer_cmds)
     except Exception as e:
         msg = 'Issues running pyseer in parallel.\n'
         sys.stderr.write(msg)
@@ -295,9 +294,8 @@ def lsaBGC_Sociate():
         sys.exit(1)
 
     try:
-        p = multiprocessing.Pool(threads)
-        p.map(util.multiProcessNoLog, count_cmds)
-        p.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.map(util.multiProcessNoLog, count_cmds)
     except Exception as e:
         msg = 'Issues running count_patterns.py in parallel.\n'
         sys.stderr.write(msg)
@@ -383,9 +381,8 @@ def lsaBGC_Sociate():
         hmmemit_cmds.append(hmmemit_cmd)
     
     try:
-        p = multiprocessing.Pool(parallel_jobs_4thread)
-        p.map(util.multiProcessNoLog, muscle_cmds)
-        p.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+            executor.map(util.multiProcessNoLog, muscle_cmds)
     except Exception as e:
         msg = 'Issues running muscle in parallel!\n'
         sys.stderr.write(msg)
@@ -393,9 +390,8 @@ def lsaBGC_Sociate():
         sys.exit(1)
 
     try:
-        p = multiprocessing.Pool(threads)
-        p.map(util.multiProcessNoLog, hmmbuild_cmds)
-        p.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.map(util.multiProcessNoLog, hmmbuild_cmds)
     except Exception as e:
         msg = 'Issues running hmmbuild in parallel.\n'
         sys.stderr.write(msg)
@@ -403,9 +399,8 @@ def lsaBGC_Sociate():
         sys.exit(1)
 
     try:
-        p = multiprocessing.Pool(threads)
-        p.map(util.multiProcessNoLog, hmmemit_cmds)
-        p.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.map(util.multiProcessNoLog, hmmemit_cmds)
     except Exception as e:
         msg = 'Issues running hmmemit in parallel.\n'
         sys.stderr.write(msg)

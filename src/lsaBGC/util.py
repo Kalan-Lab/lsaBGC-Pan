@@ -2,23 +2,17 @@ import os
 import sys
 import json
 from Bio import SeqIO
-from Bio.Seq import Seq
-from Bio.SeqFeature import SeqFeature, FeatureLocation
 import logging
 import subprocess
 import statistics
 from operator import itemgetter
 from collections import defaultdict
 import traceback
-import multiprocessing
-import copy
-from scipy import stats
+import concurrent.futures
 from ete3 import Tree
-import itertools
-import math
+import concurrent.futures
 import numpy as np
 import gzip
-import pathlib
 import warnings
 warnings.simplefilter('ignore')
 import pkg_resources  # part of setuptools
@@ -120,9 +114,8 @@ def runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matr
 					 		 '-m', ortholog_matrix_file, '-o', resdir, '-c', str(multi_thread), logObject]
 			lsabgc_map_cmds.append(lsabgc_map_cmd)
 		try:
-			p = multiprocessing.Pool(parallel_jobs_4thread)
-			p.map(multiProcess, lsabgc_map_cmds)
-			p.close()
+			with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+				executor.map(multiProcess, lsabgc_map_cmds)
 		except:
 			msg = 'Issues with parallel running lsaBGC-MIBiGMapper commands.'
 			sys.stderr.write(msg + '\n')
@@ -160,9 +153,8 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 			lsabgc_see_and_csi_cmds.append(lsabgc_csi_cmd)
 			
 		try:
-			p = multiprocessing.Pool(threads)
-			p.map(multiProcess, lsabgc_see_and_csi_cmds)
-			p.close()
+			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+				executor.map(multiProcess, lsabgc_see_and_csi_cmds)
 		except:
 			msg = 'Issues with parallel running of lsaBGC-See and lsaBGC-ComprehenSeeIve commands.'
 			sys.stderr.write(msg + '\n')
@@ -178,8 +170,40 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 		sys.stderr.write(traceback.format_exc() + '\n')
 		sys.exit(1)
 
+def computeConservationOfOGWithinGCFContext(inputs):
+	bgc_paths, og_listing_file, output_file, logObject = inputs
+	
+	try:
+		lt_to_og = {}
+		with open(og_listing_file) as oolf:
+			for line in oolf:
+				line = line.strip()
+				ls = line.split('\t')
+				lt_to_og[ls[0]] = ls[1]
+		
+		og_bgcs = defaultdict(set)
+		for bgc in bgc_paths:
+			with open(bgc) as obgbk:
+				for rec in SeqIO.parse(obgbk, 'genbank'):
+					for feat in rec.features:
+						if feat.type != 'CDS': continue
+						lt = feat.qualifiers.get('locus_tag')[0]
+						og = lt_to_og[lt]
+						og_bgcs[og].add(bgc)
+		
+		outf = open(output_file, 'w')
+		for og in og_bgcs:
+			og_bgc_prop = len(og_bgcs[og])/float(len(bgc_paths))
+			outf.write(og + '\t' + str(og_bgc_prop) + '\n')
+		outf.close()	
+	except:
+		msg = 'Issues computing conservation of orthogroups for complete instances of GCF %s' % output_file.split('/')[-1].split('.txt')[0]
+		logObject.error(msg)
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
 
-def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, multi_thread, parallel_jobs_4thread, logObject):
+def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, threads, multi_thread, parallel_jobs_4thread, logObject):
 	try:
 		gcf_sample_bgcs = defaultdict(lambda: defaultdict(list))
 		edgy_bgcs = set([])
@@ -195,6 +219,7 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 					gcf_bgcs[gcf_id].append(bgc_path)
 
 		zol_cmds = []
+		complete_conservation_inputs = []
 	
 		zp = zol_parameters
 		if zol_high_quality_preset:
@@ -222,15 +247,27 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 				os.mkdir(zol_comp_results_dir + gcf)
 
 			if len(gcf_full_bgcs_to_input) > 0:
-				zol_full_cmd = ['zol', '-c', str(multi_thread), '-i', ' '.join(gcf_full_bgcs_to_input), zp, '-po', ortholog_listing_file,  '-o', zol_full_results_dir + gcf + '/', logObject]
-				zol_cmds.append(zol_full_cmd)
+				complete_conservation_input = [gcf_full_bgcs_to_input, ortholog_listing_file, zol_full_results_dir + gcf + '.txt', logObject]
+				complete_conservation_inputs.append(complete_conservation_input)
+				#zol_full_cmd = ['zol', '-c', str(multi_thread), '-i', ' '.join(gcf_full_bgcs_to_input), zp, '-po', ortholog_listing_file,  '-o', zol_full_results_dir + gcf + '/', logObject]
+				#zol_cmds.append(zol_full_cmd)
 			else:
 				os.mkdir(zol_full_results_dir + gcf)
 
 		try:
-			p = multiprocessing.Pool(parallel_jobs_4thread)
-			p.map(multiProcess, zol_cmds)
-			p.close()
+			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+				executor.map(computeConservationOfOGWithinGCFContext, complete_conservation_inputs)			
+		except:
+			msg = 'Issues with parallel computing of orthogroup conservations across complete instances.'
+			sys.stderr.write(msg + '\n')
+			logObject.error(msg)
+			sys.stderr.write(traceback.format_exc())
+			logObject.error(traceback.format_exc())
+			sys.exit(1)
+
+		try:
+			with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+				executor.map(multiProcess, zol_cmds)
 		except:
 			msg = 'Issues with parallel running of zol commands.'
 			sys.stderr.write(msg + '\n')
@@ -246,9 +283,6 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 		sys.stderr.write(traceback.format_exc() + '\n')
 		sys.exit(1)
 
-#def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_results_dir, ):
-#	try:
-#	except:
 
 def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[]):
 	if logObject != None:
@@ -1044,9 +1078,8 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 			panaroo_inputs.append(outf)
 
 		try:
-			p = multiprocessing.Pool(threads)
-			p.map(multiProcess, reformat_cmds)
-			p.close()
+			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+				executor.map(multiProcess, reformat_cmds)
 		except:
 			msg = 'Issues creating Prokka-like GFF files for Panaroo.'
 			sys.stderr.write(msg + '\n')
@@ -1448,19 +1481,20 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 		# ^ basically added two columns (GCF id and complete instances conservation) and took away one (custom db annotation)
 
 		zol_full_dir = zol_results_dir + 'Comprehensive/'
-		zol_comp_dir = zol_results_dir + 'Complete_Instances/'	
+		gcf_comp_cons_dir = zol_results_dir + 'Complete_Instances/'	
 
 		comp_cons = defaultdict(lambda: defaultdict(lambda: 'NA'))
-		for gcf in os.listdir(zol_comp_dir):
-			gcf_result_file = zol_comp_dir + gcf + '/Final_Results/Consolidated_Report.tsv'
-			if not os.path.isfile(gcf_result_file): continue			
-			with open(gcf_result_file) as ogrf:
+		for f in os.listdir(gcf_comp_cons_dir):
+			gcf_comp_cons_file = gcf_comp_cons_dir + f
+			gcf = f.split('.txt')[0]
+			if not os.path.isfile(gcf_comp_cons_file): continue			
+			with open(gcf_comp_cons_file) as ogrf:
 				for i, line in enumerate(ogrf):
 					if i == 0: continue
 					line = line.strip()
 					ls = line.split('\t')
 					og = ls[0]
-					cons = ls[2]
+					cons = ls[1]
 					comp_cons[gcf][og] = cons
 
 		zctf_handle = open(zol_combined_tsv_file, 'w')

@@ -38,9 +38,7 @@
 import os
 import sys
 import argparse
-import subprocess
 import traceback
-import multiprocessing
 import math
 import itertools
 from Bio import SeqIO
@@ -48,8 +46,10 @@ from operator import itemgetter
 from collections import defaultdict
 from time import sleep
 from lsaBGC import util
-from ete3 import Tree
+import concurrent.futures
 import warnings
+import shutil
+
 warnings.filterwarnings('ignore')
 
 def create_parser():
@@ -121,7 +121,7 @@ def create_parser():
 	""", formatter_class=argparse.RawTextHelpFormatter)
 
 	parser.add_argument('-a', '--antismash-results-directory', help="A directory with subdirectories corresponding to antiSMASH results\nper sample/genome [Optional].", required=False, default=None)
-	parser.add_argument('-g', '--genomes-directory', help="A directory with additional genomes, e.g. those recently\nsequenced by the user, belonging to the taxa. Accepted formats\ninclude FASTA. Accepted suffices include: .fna, .fa, .fasta.\nWill run GECCO for\nBGC-predictions [Optional].", required=False, default=None)
+	parser.add_argument('-g', '--genomes', nargs='+', help="Paths to genomes or directories with genomes in FASTA format.\nWill run GECCO for BGC-predictions [Optional].", required=False, default=[])
 	parser.add_argument('-o', '--output-directory', help="Parent output/workspace directory.", required=True)
 
 	parser.add_argument('-f', '--fungal', action='store_true', help="Specify if input are from fungal genomes. Only possible\nif antiSMASH results are provided.", required=False, default=False)
@@ -179,7 +179,7 @@ def lsaBGC():
 
 	### PARSE OPTIONS
 	antismash_directory = myargs.antismash_results_directory
-	genomes_directory = myargs.genomes_directory
+	genome_inputs = myargs.genomes
 	outdir = os.path.abspath(myargs.output_directory) + '/'
 
 	fungal_flag = myargs.fungal
@@ -211,26 +211,45 @@ def lsaBGC():
 	threads = myargs.threads
 	docker_mode_flag = myargs.docker_mode
 
-	if (antismash_directory != None and os.path.isdir(antismash_directory)) and (genomes_directory != None and os.path.isdir(genomes_directory)):
-		msg = 'Both directories of antiSMASH results and genomes provided. This is not alllowed currently.'
+	raw_genome_files = []
+	raw_genomes_provided = False
+	for gi in genome_inputs:
+		if os.path.isfile(gi):
+			if util.is_fasta(gi):
+				raw_genome_files.append(os.path.abspath(gi))
+			else:
+				msg = 'Unable to validate the file %s is in FASTA format, skipping' % gi
+				sys.stderr.write(msg + '\n')
+				logObject.warning(msg)
+		elif os.path.isdir(gi):
+			genome_dir = os.path.abspath(gi) + '/'
+			for f in os.listdir(genome_dir):
+				genome_file = genome_dir + f
+				if os.path.isfile(genome_file):
+					if util.is_fasta(genome_file):
+						raw_genome_files.append(genome_dir + f)
+					else:
+						msg = 'Unable to validate the file %s is in FASTA format, skipping' % genome_file + f
+						sys.stderr.write(msg + '\n')
+						logObject.warning(msg)
+		else:
+			msg = 'Unable to validate %s as a file or directory, skipping' % gi
+			sys.stderr.write(msg + '\n')
+			logObject.warning(msg)
+		if len(raw_genome_files) > 0:
+			raw_genomes_provided = True
+
+	if (antismash_directory != None and os.path.isdir(antismash_directory)) and raw_genomes_provided == True:
+		msg = 'Both directories of antiSMASH results and genomes provided. This is not alllowed currently - if you want a joint antiSMASH and GECCO analysis - just provide the antiSMASH results and specify the argument --run-gecco.'
 		sys.stderr.write(msg + '\n')
 		sys.exit(1)
 	elif (antismash_directory != None and os.path.isdir(antismash_directory)):
 		antismash_directory = os.path.abspath(antismash_directory) + '/'
 		msg = 'antiSMASH results directory provided: %s' % antismash_directory
 		sys.stderr.write(msg + '\n')
-	elif (genomes_directory != None and os.path.isdir(genomes_directory)):
-		genomes_directory = os.path.abspath(genomes_directory) + '/'
-		msg = 'Genomes directory provided: %s' % genomes_directory
+	elif (raw_genomes_provided == True):
+		msg = 'Raw genomes provided: %s' % raw_genome_files
 		sys.stderr.write(msg + '\n')
-
-	if genomes_directory != None:
-		try:
-			genomes_directory = os.path.abspath(genomes_directory) + '/'
-			assert (os.path.isdir(genomes_directory))
-		except:
-			sys.stderr.write('User defined genomes directory could not be validated to exist!\n')
-			sys.exit(1)
 
 	if os.path.isdir(outdir):
 		sys.stderr.write(
@@ -265,9 +284,14 @@ def lsaBGC():
 		use_panaroo_flag = False
 		try:
 			assert(antismash_directory != None and os.path.isdir(antismash_directory))
+			if run_gecco_flag:
+				msg = 'fungal mode triggered but --run-gecco also specified, GECCO is not designed for fungi - so turning it off.'
+				sys.stderr.write(msg + '\n')
+				logObject.warning(msg)
 		except:
 			msg = 'fungal mode triggered but no antiSMASH results were provided. GECCO is not designed for fungi, so exiting ...'
 			sys.stderr.write(msg + '\n')
+			logObject.error(msg)
 			sys.exit(1)
 	else:
 		gw_pkl = outdir + 'GECCO_PF_Weights.pkl'
@@ -387,9 +411,8 @@ is preferred, users can issue the --keep_locus_tags option.
 						lt_check_inputs.append([sample, 'bgc_region', bgc_gbk, outf, logObject])
 
 				try:
-					p = multiprocessing.Pool(threads)
-					p.map(util.checkCDSHaveLocusTags, lt_check_inputs)
-					p.close()
+					with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+						executor.map(util.checkCDSHaveLocusTags, lt_check_inputs)
 				except Exception as e:
 					msg = 'Issues with assessing the validity and presence of locus tags in GenBank files.'
 					sys.stderr.write(msg + '\n')
@@ -427,9 +450,8 @@ is preferred, users can issue the --keep_locus_tags option.
 					recreate_gbks_inputs.append([sample, lt, genbank_recreate_dir, sample_genomes[sample]] + sample_bgc_regions[sample] + [keep_lt_flag, logObject])
 					
 				try:
-					p = multiprocessing.Pool(threads)
-					p.map(util.addLocusTagsToGBKs, recreate_gbks_inputs)
-					p.close()
+					with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+						executor.map(util.addLocusTagsToGBKs, recreate_gbks_inputs)
 				except Exception as e:
 					msg = 'Issues with recreating select GenBank files to make sure each CDS feature has locus tags.'
 					sys.stderr.write(msg + '\n')
@@ -482,9 +504,8 @@ is preferred, users can issue the --keep_locus_tags option.
 						scaff_inf_inputs.append([genome_gbk, bgc_gbk, outf])
 						antismash_location_data.append([sample, genome_gbk, bgc_gbk, outf])
 				try:
-					p = multiprocessing.Pool(threads)
-					p.map(util.findAntiSMASHBGCInFullGenbank, scaff_inf_inputs)
-					p.close()
+					with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+						executor.map(util.findAntiSMASHBGCInFullGenbank, scaff_inf_inputs)
 				except Exception as e:
 					msg = 'Issues with parallel determination of the location of antiSMASH BGCs.'
 					sys.stderr.write(msg + '\n')
@@ -507,9 +528,8 @@ is preferred, users can issue the --keep_locus_tags option.
 						gecco_cmds.append(gecco_cmd)
 
 					try:
-						p = multiprocessing.Pool(parallel_jobs_4thread)
-						p.map(util.multiProcess, gecco_cmds)
-						p.close()
+						with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+							executor.map(util.multiProcess, gecco_cmds)
 					except:
 						msg = 'Issues with parallel running of GECCO commands.'
 						sys.stderr.write(msg + '\n')
@@ -570,6 +590,27 @@ is preferred, users can issue the --keep_locus_tags option.
 					dblf_handle.write('\t'.join([str(x) for x in [sample, prediction_software, sample_genomes[sample], bgc_id, bgc_file, bgc_type, scaff, start_coord, end_coord, bgc_length, dist_to_edge]]) + '\n')
 					sblf_handle.write('\t'.join([sample, bgc_file, prediction_software, str(dist_to_edge)]) + '\n')
 		else:
+			troublesome_characters = set([' ', '\t', ',', '|', '\\'])
+			local_genomes_needed = False
+			for rgf in raw_genome_files:
+				for tc in troublesome_characters:
+					if tc in rgf:
+						local_genomes_needed = True
+				
+			genome_files = raw_genome_files
+			if local_genomes_needed:
+				local_genomes_dir = os.path.abspath(outdir) + '/Local_Genomes/'
+				util.setupReadyDirectory([local_genomes_dir])
+
+				genome_files = []
+				for rgf in raw_genome_files:
+					new_rgf_name = rgf.split('/')[-1]
+					for tc in troublesome_characters:
+						new_rgf_name = new_rgf_name.replace(tc, '_')
+					new_genome_file = local_genomes_dir + new_rgf_name
+					shutil.copy2(rgf, new_genome_file)
+					genome_files.append(new_genome_file)
+					 
 			gene_call_dir = outdir + 'Gene_Calling/'
 
 			util.setupReadyDirectory(([gene_call_dir]))
@@ -579,15 +620,8 @@ is preferred, users can issue the --keep_locus_tags option.
 			possible_locustags = sorted(list(set([''.join(list(x)) for x in list(itertools.product(alphabet, repeat=3))])))
 
 			sample_genomes = {}
-			for i, file in enumerate(os.listdir(genomes_directory)):
-				sample = util.cleanUpSampleName('.'.join(file.split('.')[:-1]))
-				genome_file = genomes_directory + file
-				try:
-					assert (util.is_fasta(genome_file))
-				except:
-					msg = 'The file %s does not seem to be in FASTA format' % genome_file
-					logObject.warning(msg + '\n')
-					continue
+			for i, genome_file in enumerate(genome_files):
+				sample = util.cleanUpSampleName('.'.join(genome_file.split('/')[-1].split('.')[:-1]))
 				sample_genomes[sample] = gene_call_dir + sample + '.gbk'
 				rpc = ['runProdigalAndMakeProperGenbank.py', '-i', genome_file, '-s', sample, 
 		               '-o', gene_call_dir, '-l', possible_locustags[i], logObject]
@@ -606,9 +640,8 @@ is preferred, users can issue the --keep_locus_tags option.
 				sys.exit(1)
 
 			try:
-				p = multiprocessing.Pool(threads)
-				p.map(util.multiProcess, run_prodigal_cmds)
-				p.close()
+				with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+					executor.map(util.multiProcess, run_prodigal_cmds)
 			except:
 				msg = 'Issues with running gene calling.'
 				sys.stderr.write(msg + '\n')
@@ -627,9 +660,8 @@ is preferred, users can issue the --keep_locus_tags option.
 				gecco_cmds.append(gecco_cmd)
 
 			try:
-				p = multiprocessing.Pool(parallel_jobs_4thread)
-				p.map(util.multiProcess, gecco_cmds)
-				p.close()
+				with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+					executor.map(util.multiProcess, gecco_cmds)
 			except:
 				msg = 'Issues with parallel running of GECCO commands.'
 				sys.stderr.write(msg + '\n')
@@ -722,9 +754,8 @@ is preferred, users can issue the --keep_locus_tags option.
 				extract_cds_inputs.append([genome_gbk, proteome_faa, logObject])
 
 			try:
-				p = multiprocessing.Pool(threads)
-				p.map(util.extractProteinsFromGenBank, extract_cds_inputs)
-				p.close()
+				with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+					executor.map(util.extractProteinsFromGenBank, extract_cds_inputs)
 			except:
 				msg = 'Issues with parallel extraction of CDS proteins into FASTA files from GenBank files.'
 				sys.stderr.write(msg + '\n')
@@ -961,7 +992,7 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 	if not os.path.isfile(step_7_checkpoint_file):
 		util.setupReadyDirectory([zol_results_dir, zol_comp_results_dir, zol_full_results_dir])
 		ortholog_listing_file = util.reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject)
-		util.runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, multi_thread, parallel_jobs_4thread, logObject)
+		util.runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, threads, multi_thread, parallel_jobs_4thread, logObject)
 		os.system('touch %s' % step_7_checkpoint_file)
 
 	# Step 8: Running GSeeF, lsaBGC-See and lsaBGC-ComprehenSeeIve
