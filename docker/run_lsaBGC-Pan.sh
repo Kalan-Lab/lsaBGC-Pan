@@ -48,7 +48,7 @@ while [[ ! $# -eq 0 ]]; do
 		EASY_ARGS+="-g $CONTAINER_INPUT_DIR/$INPUT_DIR "
 		DOCKER_VOLUME_ARGS+="--volume $INPUT_PARENT_DIR:$CONTAINER_INPUT_DIR:ro "
 		shift
-	elif [[ "$1" == '-o' || "$1" == '--output_directory' ]]; then
+	elif [[ "$1" == '-o' || "$1" == '--output-directory' ]]; then
 		shift
 	        ABS_VALUE=$(get_abs_filename $1)
 		OUTPUT_DIR=$(basename $ABS_VALUE)
