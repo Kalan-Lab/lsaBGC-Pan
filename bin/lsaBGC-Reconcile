@@ -285,7 +285,6 @@ def lsaBGC_Reconcile():
     fasttree_cmds = []
     plot_inputs = []
     for bo in bgc_ogs:
-        og_prot_faa = bgc_og_protseq_dir + bo + '.faa'
         og_prot_msa = bgc_og_protalgn_dir + bo + '.msa.faa'
         og_prot_trim = bgc_og_prottrim_dir + bo + '.msa.trimmed.faa'
         og_prot_tre = bgc_og_prottree_dir + bo + '.tre'
@@ -293,7 +292,7 @@ def lsaBGC_Reconcile():
         og_rscript_file = bgc_og_visuals_script_dir + bo + '.R'
         og_pdf_file = bgc_og_visuals_dir + bo + '.pdf'
 
-        if os.path.isfile(og_prot_msa) and os.path.getsize(og_prot_msa) > 50:
+        if os.path.isfile(og_prot_msa) or os.path.getsize(og_prot_msa) > 50:
             trimal_cmd = ['trimal', '-in', og_prot_msa, '-out', og_prot_trim, '-strict']
             fasttree_cmd = ['fasttree', og_prot_trim, '>', og_prot_tre]
             plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject]
@@ -315,23 +314,44 @@ def lsaBGC_Reconcile():
             sys.stderr.write(traceback.format_exc())
             sys.exit(1)
 
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-                executor.map(util.multiProcessNoLog, fasttree_cmds)
-        except Exception as e:
-            msg = 'Issues running fasttree in parallel.\n'
-            sys.stderr.write(msg)
-            sys.stderr.write(traceback.format_exc())
-            sys.exit(1)
+        fasttree_cmds = []
+        plot_inputs = []
+        for bo in bgc_ogs:
+            og_prot_trim = bgc_og_prottrim_dir + bo + '.msa.trimmed.faa'
+            og_prot_tre = bgc_og_prottree_dir + bo + '.tre'
+            og_track_file = bgc_og_tracks_dir + bo + '.txt'
+            og_rscript_file = bgc_og_visuals_script_dir + bo + '.R'
+            og_pdf_file = bgc_og_visuals_dir + bo + '.pdf'
 
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-                executor.map(runPlotting, plot_inputs)
-        except Exception as e:
-            msg = 'Issues creating plots.\n'
-            sys.stderr.write(msg)
-            sys.stderr.write(traceback.format_exc())
-            sys.exit(1)
+            if os.path.isfile(og_prot_trim) or os.path.getsize(og_prot_trim) > 50:
+                fasttree_cmd = ['fasttree', og_prot_trim, '>', og_prot_tre]
+                plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject]
+                trimal_cmds.append(trimal_cmd)
+                fasttree_cmds.append(fasttree_cmd)
+                plot_inputs.append(plot_input)
+            else:
+                msg = 'Not producing plot for orthogroup %s because trimming of protein alignment had issues!' % bo
+                logObject.warning(msg)
+                sys.stderr.write('Warning: ' + msg + '\n')            
+
+        if len(fasttree_cmds) > 0:
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                    executor.map(util.multiProcessNoLog, fasttree_cmds)
+            except Exception as e:
+                msg = 'Issues running fasttree in parallel.\n'
+                sys.stderr.write(msg)
+                sys.stderr.write(traceback.format_exc())
+                sys.exit(1)
+
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                    executor.map(runPlotting, plot_inputs)
+            except Exception as e:
+                msg = 'Issues creating plots.\n'
+                sys.stderr.write(msg)
+                sys.stderr.write(traceback.format_exc())
+                sys.exit(1)
 
     samples_ordered = []
     for pop in sorted(all_pops):

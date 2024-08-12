@@ -191,7 +191,7 @@ def phylogenate():
 		sys.exit(1)
 
 	all_ogs = set([])
-	og_sequence_lengths = {}
+	og_sequence_lengths = defaultdict(lambda: 0)
 	genome_og_seqs = defaultdict(lambda: defaultdict(lambda: None))
 	for f in os.listdir(trim_dir):
 		trim_msa_file = trim_dir + f
