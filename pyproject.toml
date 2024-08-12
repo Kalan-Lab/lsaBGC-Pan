@@ -10,8 +10,7 @@ requires = ['setuptools']
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-script-files=['docker/LSABGC',
-               'scripts/processAndReformatUserProvidedGenbanks.py',
+script-files=['scripts/processAndReformatUserProvidedGenbanks.py',
                'scripts/genbankToProkkaGFF.py',
                'scripts/popstrat',
                'scripts/phylogenate',
