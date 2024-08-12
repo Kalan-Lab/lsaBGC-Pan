@@ -76,7 +76,7 @@ def create_parser():
     parser.add_argument('-s', '--species_phylogeny', help="The species phylogeny in Newick format.", required=True)
     parser.add_argument('-r', '--report_hits_with_notes', action='store_true', help="Report hits with 'notes'.", required=False, default=False)
     parser.add_argument('-c', '--threads', type=int, help="Number of threads to use for MCL step [Default is 1].", required=False, default=1)
-
+    parser.add_argument('-t', '--timeout_time', type=float, help="Timeout for alignments in seconds [Default is 1800].", required=False, default=1800)
     args = parser.parse_args()
     return args
 
@@ -115,7 +115,7 @@ def lsaBGC_Sociate():
     """
 
     threads = myargs.threads
-
+    timeout_time = myargs.timeout_time
 
     parallel_jobs_4thread = max(math.floor(threads / 4), 1)
     multi_thread = 4
@@ -368,54 +368,65 @@ def lsaBGC_Sociate():
                             pf_handle.close()
 
     muscle_cmds = []
-    hmmbuild_cmds = []
-    hmmemit_cmds = []
     for og in sociated_ogs:
         og_prot_faa = bgc_og_protseq_dir + og + '.faa'
         og_prot_msa = bgc_og_protalgn_dir + og + '.msa.faa'
-        og_prot_hmm = bgc_og_hmm_dir + og + '.hmm'
-        og_prot_con = bgc_og_consensus_dir + og + '.faa'
 
-        muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
+        muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread), timeout_time]
         muscle_cmds.append(muscle_cmd)
-
-        hmmbuild_cmd = ['hmmbuild', '--amino', '--cpu', '1', '-n', og, og_prot_hmm, og_prot_msa]
-        hmmbuild_cmds.append(hmmbuild_cmd)
-		
-        hmmemit_cmd = ['hmmemit', '-c', '-o', og_prot_con, og_prot_hmm, ]
-        hmmemit_cmds.append(hmmemit_cmd)
     
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-            executor.map(util.multiProcessNoLog, muscle_cmds)
+            executor.map(util.multiProcessNoLogWithTimeout, muscle_cmds)
     except Exception as e:
         msg = 'Issues running muscle in parallel!\n'
         sys.stderr.write(msg)
         sys.stderr.write(traceback.format_exc())
         sys.exit(1)
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            executor.map(util.multiProcessNoLog, hmmbuild_cmds)
-    except Exception as e:
-        msg = 'Issues running hmmbuild in parallel.\n'
-        sys.stderr.write(msg)
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
+    hmmbuild_cmds = []
+    hmmemit_cmds = []
+    annotation_notes = defaultdict(lambda: '')
+    for og in sociated_ogs:
+        og_prot_faa = bgc_og_protseq_dir + og + '.faa'
+        og_prot_msa = bgc_og_protalgn_dir + og + '.msa.faa'
+        og_prot_hmm = bgc_og_hmm_dir + og + '.hmm'
+        og_prot_con = bgc_og_consensus_dir + og + '.faa'
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            executor.map(util.multiProcessNoLog, hmmemit_cmds)
-    except Exception as e:
-        msg = 'Issues running hmmemit in parallel.\n'
-        sys.stderr.write(msg)
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
+        if os.path.isfile(og_prot_msa) and os.path.getsize(og_prot_msa) > 50:
+            hmmbuild_cmd = ['hmmbuild', '--amino', '--cpu', '1', '-n', og, og_prot_hmm, og_prot_msa]
+            hmmbuild_cmds.append(hmmbuild_cmd)
+    
+            hmmemit_cmd = ['hmmemit', '-c', '-o', og_prot_con, og_prot_hmm, ]
+            hmmemit_cmds.append(hmmemit_cmd)
+        else:
+            annotation_notes[og] = 'alignment timed out during construction to generate consensus sequence for annotation - full set of protein sequences for the orthogroup can be found at: %s' % og_prot_faa
+
+    if len(hmmbuild_cmds) > 0:
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                executor.map(util.multiProcessNoLog, hmmbuild_cmds)
+        except Exception as e:
+            msg = 'Issues running hmmbuild in parallel.\n'
+            sys.stderr.write(msg)
+            sys.stderr.write(traceback.format_exc())
+            sys.exit(1)
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                executor.map(util.multiProcessNoLog, hmmemit_cmds)
+        except Exception as e:
+            msg = 'Issues running hmmemit in parallel.\n'
+            sys.stderr.write(msg)
+            sys.stderr.write(traceback.format_exc())
+            sys.exit(1)
 
     consensus_results_file = outdir + 'Sociated_OGs_Consensus_Sequences.faa'
     crf_handle = open(consensus_results_file, 'w')
+    con_seqs = 0
     for f in os.listdir(bgc_og_consensus_dir):
         og = f.split('.faa')[0]
+        con_seqs += 1
         with open(bgc_og_consensus_dir + f) as ocf:
             for rec in SeqIO.parse(ocf, 'fasta'):
                 crf_handle.write('>' + og + '\n' + str(rec.seq) + '\n')
@@ -423,15 +434,15 @@ def lsaBGC_Sociate():
 
     annot_dir = outdir + 'Sociated_OGs_Annotations/'
     annotation_result = annot_dir + 'Annotation_Results.tsv'
-    annotate_cmd = ['annotateProtSeqs.py', '-i', consensus_results_file, '-o', annot_dir, '-c', str(threads)]
-    util.runCmdViaSubprocess(annotate_cmd, logObject=logObject, check_files=[annotation_result])
-
     soc_og_annotations = defaultdict(lambda: ['NA']*9)
-    with open(annotation_result) as oar:
-        for line in oar:
-            line = line.strip('\n')
-            prot, ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots, prot_seq = line.split('\t')
-            soc_og_annotations[prot] = [ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots]
+    if con_seqs > 0:
+        annotate_cmd = ['annotateProtSeqs.py', '-i', consensus_results_file, '-o', annot_dir, '-c', str(threads)]
+        util.runCmdViaSubprocess(annotate_cmd, logObject=logObject, check_files=[annotation_result])
+        with open(annotation_result) as oar:
+            for line in oar:
+                line = line.strip('\n')
+                prot, ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots, prot_seq = line.split('\t')
+                soc_og_annotations[prot] = [ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots]
 
     # Step 7: Create final results file and visualizations
     track_dir = outdir + 'Tracks_for_Visual/'
@@ -442,7 +453,7 @@ def lsaBGC_Sociate():
     final_result_tsv = outdir + 'Final_Sociated_Results.tsv'
     frt = open(final_result_tsv, 'w')
     header = ['focal GCF', 'assocaited GCF/OG', 'allele frequency', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 
-              'beta-std-err', 'variant_h2', 'notes', 'KO Annotation (E-value)', 'PGAP Annotation (E-value)', 
+              'beta-std-err', 'variant_h2', 'notes', 'annotation notes', 'KO Annotation (E-value)', 'PGAP Annotation (E-value)', 
               'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)', 'IS Finder (E-value)', 
               'MI-BiG Annotation (E-value)', 'VOG Annotation (E-value)',  'VFDB Annotation (E-value)', 'Pfam Domains']
     frt.write('\t'.join(header) + '\n')
@@ -462,7 +473,7 @@ def lsaBGC_Sociate():
             for s in og_samples[hit[1]]:          
                 tfh.write('\t'.join([hit[1], s, hit[4], beta_cat]) + '\n')
         tfh.close()
-        frt.write('\t'.join(hit + soc_og_annotations[hit[1]]) + '\n')
+        frt.write('\t'.join(hit + [annotation_notes[hit[1]]] + soc_og_annotations[hit[1]]) + '\n')
 
     frt.close()
 

@@ -553,6 +553,21 @@ def run_cmd(cmd, logObject, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 		logObject.error(traceback.format_exc())
 		raise RuntimeError('Had an issue running: %s' % ' '.join(cmd))
 
+def multiProcessNoLogWithTimeout(input):
+	"""
+	Genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
+	to space separated command (as list).
+	"""
+	input_cmd = input[:-1]
+	TIMEOUT = input[-1] 
+	try:
+		subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+						executable='/bin/bash', timeout=TIMEOUT)
+	except subprocess.TimeoutExpired:
+		sys.stderr.write('Command timed out: ' + ' '.join(input_cmd))
+		sys.stderr.write(traceback.format_exc())
+		return
+
 def multiProcessNoLog(input_cmd):
 	"""
 	Genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond

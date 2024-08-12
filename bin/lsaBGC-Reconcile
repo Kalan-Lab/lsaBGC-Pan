@@ -71,6 +71,7 @@ def create_parser():
     parser.add_argument('-sd', '--scratch_directory', help="Scratch directory for generating alignments and trees.", required=True)
     parser.add_argument('-q', '--high_quality', action='store_true', help="Run MUSCLE align instead of super5.", required=False, default=False)
     parser.add_argument('-c', '--threads', type=int, help="Number of threads to use for MCL step [Default is 1].", required=False, default=1)
+    parser.add_argument('-t', '--timeout_time', type=float, help="Timeout for alignments in seconds [Default is 1800].", required=False, default=1800)
 
     args = parser.parse_args()
     return args
@@ -110,6 +111,7 @@ def lsaBGC_Reconcile():
 
     high_qual_flag = myargs.high_quality
     threads = myargs.threads
+    timeout_time = myargs.timeout_time
 
     parallel_jobs_4thread = max(math.floor(threads / 4), 1)
     multi_thread = 4
@@ -262,6 +264,23 @@ def lsaBGC_Reconcile():
     ccmf_handle.close()
 
     muscle_cmds = []
+    for bo in bgc_ogs:
+        og_prot_faa = bgc_og_protseq_dir + bo + '.faa'
+        og_prot_msa = bgc_og_protalgn_dir + bo + '.msa.faa'
+        muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
+        if high_qual_flag:
+            muscle_cmd = ['muscle', '-align', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
+        muscle_cmds.append(muscle_cmd + [timeout_time])
+        
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+            executor.map(util.multiProcessNoLogWithTimeout, muscle_cmds)
+    except Exception as e:
+        msg = 'Issues running muscle in parallel!\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
     trimal_cmds = []
     fasttree_cmds = []
     plot_inputs = []
@@ -274,52 +293,45 @@ def lsaBGC_Reconcile():
         og_rscript_file = bgc_og_visuals_script_dir + bo + '.R'
         og_pdf_file = bgc_og_visuals_dir + bo + '.pdf'
 
-        muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
-        if high_qual_flag:
-            muscle_cmd = ['muscle', '-align', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread)]
-        trimal_cmd = ['trimal', '-in', og_prot_msa, '-out', og_prot_trim, '-strict']
-        fasttree_cmd = ['fasttree', og_prot_trim, '>', og_prot_tre]
-        plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject]
-        muscle_cmds.append(muscle_cmd)
-        trimal_cmds.append(trimal_cmd)
-        fasttree_cmds.append(fasttree_cmd)
-        plot_inputs.append(plot_input)
+        if os.path.isfile(og_prot_msa) or os.path.getsize(og_prot_msa) > 50:
+            trimal_cmd = ['trimal', '-in', og_prot_msa, '-out', og_prot_trim, '-strict']
+            fasttree_cmd = ['fasttree', og_prot_trim, '>', og_prot_tre]
+            plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject]
+            trimal_cmds.append(trimal_cmd)
+            fasttree_cmds.append(fasttree_cmd)
+            plot_inputs.append(plot_input)
+        else:
+            msg = 'Not producing plot for orthogroup %s because protein alignment timed out (>30 minutes)!' % bo
+            logObject.warning(msg)
+            sys.stderr.write('Warning: ' + msg + '\n')            
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-            executor.map(util.multiProcessNoLog, muscle_cmds)
-    except Exception as e:
-        msg = 'Issues running muscle in parallel!\n'
-        sys.stderr.write(msg)
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
+    if len(trimal_cmds) > 0:
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                executor.map(util.multiProcessNoLog, trimal_cmds)
+        except Exception as e:
+            msg = 'Issues running trimal in parallel.\n'
+            sys.stderr.write(msg)
+            sys.stderr.write(traceback.format_exc())
+            sys.exit(1)
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            executor.map(util.multiProcessNoLog, trimal_cmds)
-    except Exception as e:
-        msg = 'Issues running trimal in parallel.\n'
-        sys.stderr.write(msg)
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                executor.map(util.multiProcessNoLog, fasttree_cmds)
+        except Exception as e:
+            msg = 'Issues running fasttree in parallel.\n'
+            sys.stderr.write(msg)
+            sys.stderr.write(traceback.format_exc())
+            sys.exit(1)
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            executor.map(util.multiProcessNoLog, fasttree_cmds)
-    except Exception as e:
-        msg = 'Issues running fasttree in parallel.\n'
-        sys.stderr.write(msg)
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
-
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            executor.map(util.multiProcessNoLog, plot_inputs)
-    except Exception as e:
-        msg = 'Issues creating plots.\n'
-        sys.stderr.write(msg)
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                executor.map(runPlotting, plot_inputs)
+        except Exception as e:
+            msg = 'Issues creating plots.\n'
+            sys.stderr.write(msg)
+            sys.stderr.write(traceback.format_exc())
+            sys.exit(1)
 
     samples_ordered = []
     for pop in sorted(all_pops):

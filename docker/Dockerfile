@@ -10,7 +10,7 @@ WORKDIR /usr/src
 SHELL ["/bin/bash", "-c"]
 
 #  Setup lsaBGC-Pan using Bioconda
-RUN apt-get update && apt-get install -y git wget libtiff5 gcc && \
+RUN apt-get update && apt-get install -y git wget gcc && \
     conda install -n base conda-libmamba-solver && conda config --set solver libmamba && \
     conda create -p /usr/src/lsaBGC_conda_env/ -c conda-forge -c bioconda -c defaults lsabgc panaroo && \
     conda clean --all -y && \
@@ -21,9 +21,9 @@ RUN apt-get update && apt-get install -y git wget libtiff5 gcc && \
 # Finish setup and download minimal databases (MIBiG v3.1 + PGAP HMMs)
 WORKDIR /usr/src/lsaBGC/
 ENV PATH /usr/src/lsaBGC_conda_env/bin:$PATH
-RUN setup_annotation_dbs.py -ld
+RUN setup_annotation_dbs.py -ld && chmod -R 555 /usr/src/lsaBGC_conda_env/ && chmod 777 /home
 USER 1000:1000
-RUN mkdir /home/input /home/output
+RUN mkdir -p /home/input /home/output
 WORKDIR /home
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8

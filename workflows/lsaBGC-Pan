@@ -156,6 +156,7 @@ def create_parser():
 
 	parser.add_argument('-hqr', '--high-quality-reconcile', action='store_true', help="Perform high-quality alignment for reconcile analysis.", required=False, default=False)
 	parser.add_argument('-rsh', '--report-sociate-hits', action='store_true', help="Report signficant pyseer hits with 'notes' - usually\nindicate some general issue - should be examined with caution:\nhttps://pyseer.readthedocs.io/en/master/usage.html#notes-field.", required=False, default=False)
+	parser.add_argument('-at', '--alignment-timeout', type=float, help="The timeout in seconds for constructing proteins alignments using\nMUSCLE during lsaBGC-Reconcile and lsaBGC-Sociate - to prevent long\nruns due to stragglers/abnormally large orthogroups [Default is\n1800 (30 minutes)].", required=False, default=1800)
 
 	parser.add_argument('-py', '--use-prodigal', action='store_true', help='Use prodigal instead of pyrodigal (only if genomes are provided - not\nrelevant if antiSMASH results provided).', required=False, default=False)
 	parser.add_argument('-c', '--threads', type=int, help="Total number of threads/processes to use. Recommend inreasing as much\nas possible. [Default is 4].", required=False, default=4)
@@ -212,6 +213,7 @@ def lsaBGC():
 	
 	high_quality_reconcile_flag = myargs.high_quality_reconcile
 	report_sociate_hits_flag = myargs.report_sociate_hits
+	alignment_timeout = myargs.alignment_timeout
 
 	threads = myargs.threads
 	docker_mode_flag = myargs.docker_mode
@@ -1045,7 +1047,7 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 		util.setupReadyDirectory([recon_dir, recon_scratch_dir])
 		lsabgc_reconcile_cmd = ['lsaBGC-Reconcile', '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, '-m', 
 						        ortholog_matrix_file, '-s', species_tree_file, '-o', recon_dir, '-sd', 
-								recon_scratch_dir, '-c', str(threads)]
+								recon_scratch_dir, '-c', str(threads), '-t', str(alignment_timeout)]
 		if high_quality_reconcile_flag:
 			lsabgc_reconcile_cmd += ['-q']
 		util.runCmdViaSubprocess(lsabgc_reconcile_cmd, logObject=logObject, check_files=[recon_result_file, 
@@ -1064,7 +1066,7 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 	if not os.path.isfile(step_11_checkpoint_file):
 		lsabgc_sociate_cmd = ['lsaBGC-Sociate', '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, '-m', 
 						        ortholog_matrix_file, '-s', species_tree_file, '-o', sociate_dir,
-								'-vo', visual_sociated_dir, '-c', str(threads)]
+								'-vo', visual_sociated_dir, '-c', str(threads), '-t', str(alignment_timeout)]
 		if report_sociate_hits_flag:
 			lsabgc_sociate_cmd += ['-r']
 		util.runCmdViaSubprocess(lsabgc_sociate_cmd, logObject=logObject, check_files=[sociate_result_file])
