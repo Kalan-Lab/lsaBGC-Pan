@@ -72,7 +72,9 @@ def create_parser():
     parser.add_argument('-l', '--lsabgc_detailed_listing', help='lsaBGC-Pan detailed listing with GCF and population structure information.', required=True)
     parser.add_argument('-m', '--orthomatrix', help='OrthoFinder/Panaroo ortholog by sample matrix.', required=True)
     parser.add_argument('-o', '--output_directory', help="Output directory.", required=True)
+    parser.add_argument('-vo', '--visual_output_directory', help="Visual output directory.", required=True)
     parser.add_argument('-s', '--species_phylogeny', help="The species phylogeny in Newick format.", required=True)
+    parser.add_argument('-r', '--report_hits_with_notes', action='store_true', help="Report hits with 'notes'.", required=False, default=False)
     parser.add_argument('-c', '--threads', type=int, help="Number of threads to use for MCL step [Default is 1].", required=False, default=1)
 
     args = parser.parse_args()
@@ -91,6 +93,8 @@ def lsaBGC_Sociate():
     lsabgc_detailed_listing = os.path.abspath(myargs.lsabgc_detailed_listing)
     orthofinder_matrix_file = os.path.abspath(myargs.orthomatrix)
     outdir = os.path.abspath(myargs.output_directory) + '/'
+    viz_outdir = os.path.abspath(myargs.visual_output_directory) + '/'
+    report_hits_with_notes_flag = myargs.report_hits_with_notes
     species_tree = os.path.abspath(myargs.species_phylogeny) 
 
     ### vet input files quickly
@@ -104,7 +108,7 @@ def lsaBGC_Sociate():
         sys.stderr.write("Output directory exists. Overwriting in 5 seconds ...\n ")
         sleep(5)
 
-    util.setupReadyDirectory([outdir])
+    util.setupReadyDirectory([outdir, viz_outdir])
 
     """
     PARSE OPTIONAL INPUTS
@@ -326,14 +330,15 @@ def lsaBGC_Sociate():
         with open(pyseer_results_dir + f) as ogcf:
             for i, line in enumerate(ogcf):
                 if i == 0: continue
-                line = line.strip()
+                line = line.strip('\n')
                 ls = line.split('\t')
                 lrt_pval = float(ls[3])
                 if lrt_pval <= gcf_pval_thresholds[gcf][type]:
-                    genotype = ls[0]
-                    if genotype != gcf and not genotype in gcf_ogs[gcf]:
-                        hits.append([gcf] + ls)
-                        sociated_ogs.add(ls[0])
+                    if report_hits_with_notes_flag or ls[-1] == '':
+                        genotype = ls[0]
+                        if genotype != gcf and not genotype in gcf_ogs[gcf]:
+                            hits.append([gcf] + ls)
+                            sociated_ogs.add(ls[0])
 
     # Step 6: Annotate associated/disassociated orthogroups
     bgc_og_protseq_dir = outdir + 'BGC_OG_Protein_Seqs/'
@@ -428,7 +433,11 @@ def lsaBGC_Sociate():
             prot, ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots, prot_seq = line.split('\t')
             soc_og_annotations[prot] = [ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots]
 
-    # Step 7: Create final results file
+    # Step 7: Create final results file and visualizations
+    track_dir = outdir + 'Tracks_for_Visual/'
+    script_dir = viz_outdir + 'Rscripts/'
+    plot_dir = viz_outdir + 'Plots/'
+    util.setupReadyDirectory([track_dir, script_dir, plot_dir])
 
     final_result_tsv = outdir + 'Final_Sociated_Results.tsv'
     frt = open(final_result_tsv, 'w')
@@ -437,9 +446,46 @@ def lsaBGC_Sociate():
               'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)', 'IS Finder (E-value)', 
               'MI-BiG Annotation (E-value)', 'VOG Annotation (E-value)',  'VFDB Annotation (E-value)', 'Pfam Domains']
     frt.write('\t'.join(header) + '\n')
+    foc_gcfs_with_hits = set([])
     for hit in hits:
+        foc_gcf = hit[0]
+        foc_gcfs_with_hits.add(foc_gcf)
+        track_file = track_dir + foc_gcf + '.txt'
+        beta_cat = 'positive'
+        if float(hit[5]) < 0:
+            beta_cat = 'negative'
+        tfh = open(track_file, 'a+')
+        if hit[1].startswith('GCF'):  
+            for s in gcf_samples[hit[1]]:          
+                tfh.write('\t'.join([hit[1], s, hit[4], beta_cat]) + '\n')
+        else:
+            for s in og_samples[hit[1]]:          
+                tfh.write('\t'.join([hit[1], s, hit[4], beta_cat]) + '\n')
+        tfh.close()
         frt.write('\t'.join(hit + soc_og_annotations[hit[1]]) + '\n')
+
     frt.close()
+
+    plot_inputs = []
+    for fg in foc_gcfs_with_hits:
+        track_file = track_dir + fg + '.txt'
+        plot_file = plot_dir + fg + '.pdf'
+        rscript_file = script_dir + fg + '.R'
+        tfh = open(track_file, 'a+')
+        for s in gcf_samples[fg]:
+            tfh.write('\t'.join(['focal_GCF', s, str(0.0), 'focal']) + '\n')
+        tfh.close()
+        plot_inputs.append([fg, species_tree, track_file, rscript_file, plot_file, logObject])
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.map(runPlotting, plot_inputs)
+    except Exception as e:
+        msg = 'Issues running plotting in parallel.\n'
+        sys.stderr.write(msg)
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
 
     # Write checkpoint file 
     checkpoint_file = outdir + 'CHECKPOINT.txt'
@@ -450,6 +496,50 @@ def lsaBGC_Sociate():
     # Close logging object and exit
     util.closeLoggerObject(logObject)
     sys.exit(0)
+
+def runPlotting(inputs):
+    gcf_id, species_tree, track_file, rscript_file, pdf_file, logObject = inputs
+    try:
+        gs_handle = open(rscript_file, 'w')
+
+        gs_handle.write('library(ggplot2)\n')  
+        gs_handle.write('library(ggtree)\n')
+        gs_handle.write('library(gggenes)\n')
+        gs_handle.write('library(ape)\n')
+        gs_handle.write('library(phytools)\n')
+        gs_handle.write('library(aplot)\n')
+        gs_handle.write('library(dplyr)\n')
+        gs_handle.write('library(grid)\n')
+        gs_handle.write('library(gridExtra)\n\n')
+
+        gs_handle.write('phylo.tree <- read.tree("' + species_tree + '")\n')
+        gs_handle.write('phylo.tree <- midpoint.root(phylo.tree)\n')
+        gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
+
+        gs_handle.write('heatmap.data <- read.table("' + track_file + '", header=F, sep="\\t")\n')
+        gs_handle.write('colnames(heatmap.data) <- c("allele", "label", "order", "value")\n')
+        gs_handle.write('colors <- c("#242424", "#4b7dc9", "#db6588")\n')
+        gs_handle.write('names(colors) <- c("focal", "positive", "negative")\n\n')
+
+        gs_handle.write('pdf("' + pdf_file + '", height=10, width=20)\n')
+        gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')   
+        gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = reorder(allele, order), y = label, fill = value)) +\n') 
+        gs_handle.write('theme_classic() + scale_fill_manual(values=colors, na.value="white") +\n')
+        gs_handle.write('xlab("") + ylab("") + geom_tile(color="white", show.legend=F) +\n')
+        gs_handle.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
+        gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
+        gs_handle.write('dev.off()\n\n')
+
+        gs_handle.close()
+		
+        rscript_cmd = ['Rscript', rscript_file]
+        util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[pdf_file])
+    except:
+        msg = 'Issues running creation of %s lsaBGC-Sociate phylo-heatmap plot for associated features: %s' % gcf_id
+        sys.stderr.write(msg + '\n')
+        logObject.error(msg)
+        sys.stderr.write(traceback.format_exc() + '\n')
+        sys.exit(1)
 
 if __name__ == '__main__':
     lsaBGC_Sociate()

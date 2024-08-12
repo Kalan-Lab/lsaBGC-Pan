@@ -447,7 +447,7 @@ def runPlotting(inputs):
         gs_handle.write('library(gridExtra)\n\n')
 
         gs_handle.write('phylo.tree <- read.tree("' + og_prot_tre + '")\n')
-
+        gs_handle.write('phylo.tree <- midpoint.root(phylo.tree)\n')
         gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
 
         gs_handle.write('heatmap.data <- read.table("' + og_track_file + '", header=T, sep="\\t")\n')

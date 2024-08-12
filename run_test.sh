@@ -6,4 +6,4 @@ tar -zxvf test_case.tar.gz
 cd test_case/
 
 # run lsaBGC on test set of select Cutibacterium avidium and Cutibacterium acnes genomes:
-lsaBGC-Pan -g input_genomes/ -o lsaBGC-Pan_Results/ -c 4 -nb
+lsaBGC-Pan -g input_genomes/ -o lsaBGC-Pan_Results/ -c 4 -nb -rsh

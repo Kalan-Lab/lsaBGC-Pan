@@ -111,11 +111,12 @@ def create_parser():
 
     PART 2
     ----------------------------------------------------------------------------------------------------------
-        - Step 7: Parallel running of zol (twice with and without the -ace option) per GCF.
+        - Step 7: Parallel running of zol and cgc per GCF.
         - Step 8: Parallel running of GSeeF, lsaBGC-See, and lsaBGC-ComprehenSeeIve per GCF.
         - Step 9: Parallel running of lsaBGC-MIBiGMapper.
-        - Step 10: Parallel running of lsaBGC-Reconcile and lsaBGC-Sociate.
-        - Step 11: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate 
+        - Step 10: Run lsaBGC-Reconcile.
+		- Step 11: Run lsaBGC-Sociate.
+        - Step 12: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate 
                    results [no checkpoint, always rerun].
     **********************************************************************************************************
 	""", formatter_class=argparse.RawTextHelpFormatter)
@@ -154,6 +155,7 @@ def create_parser():
 	# considering adding future argument for focal population definition in zol based on ID determined by popstrat
 
 	parser.add_argument('-hqr', '--high-quality-reconcile', action='store_true', help="Perform high-quality alignment for reconcile analysis.", required=False, default=False)
+	parser.add_argument('-rsh', '--report-sociate-hits', action='store_true', help="Report signficant pyseer hits with 'notes' - usually\nindicate some general issue - should be examined with caution:\nhttps://pyseer.readthedocs.io/en/master/usage.html#notes-field.", required=False, default=False)
 
 	parser.add_argument('-py', '--use-prodigal', action='store_true', help='Use prodigal instead of pyrodigal (only if genomes are provided - not\nrelevant if antiSMASH results provided).', required=False, default=False)
 	parser.add_argument('-c', '--threads', type=int, help="Total number of threads/processes to use. Recommend inreasing as much\nas possible. [Default is 4].", required=False, default=4)
@@ -208,6 +210,9 @@ def lsaBGC():
 	zol_edge_distance = myargs.edge_distance
 	zol_keep_multi_copy = myargs.zol_keep_multi_copy
 	
+	high_quality_reconcile_flag = myargs.high_quality_reconcile
+	report_sociate_hits_flag = myargs.report_sociate_hits
+
 	threads = myargs.threads
 	docker_mode_flag = myargs.docker_mode
 
@@ -325,8 +330,10 @@ def lsaBGC():
 		os.mkdir(scratch_dir)
 
 	final_dir = outdir + 'Final_Results/'
+	visual_results_dir = final_dir + 'Visualizations/'
+
 	if not os.path.isdir(final_dir):
-		os.mkdir(final_dir)
+		util.setupReadyDirectory([final_dir, visual_results_dir])
 
 	# Step 1: process input genomes / antiSMASH results
 	msg = '--------------------\nStep 1: Beginning by assessing input files\n--------------------'
@@ -981,18 +988,19 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 			dblf_handle.write('\t'.join(updated_ls) + '\n')
 	dblf_handle.close()
 	
-	# Step 7: Running zol
+	# Step 7: Running zol and cgc
 	msg = '--------------------\nStep 7: Running zol analyses\n--------------------'
 	sys.stderr.write(msg + '\n')
 	logObject.info(msg)
 	step_7_checkpoint_file = check_dir + 'Step_7.txt'
 	zol_results_dir = outdir + 'zol_Results/'
+	cgc_results_dir = visual_results_dir + 'cgc_Results/'
 	zol_comp_results_dir = zol_results_dir + 'Comprehensive/'
 	zol_full_results_dir = zol_results_dir + 'Complete_Instances/'
 	if not os.path.isfile(step_7_checkpoint_file):
-		util.setupReadyDirectory([zol_results_dir, zol_comp_results_dir, zol_full_results_dir])
+		util.setupReadyDirectory([zol_results_dir, zol_comp_results_dir, zol_full_results_dir, cgc_results_dir])
 		ortholog_listing_file = util.reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject)
-		util.runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, threads, multi_thread, parallel_jobs_4thread, logObject)
+		util.runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, cgc_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, threads, multi_thread, parallel_jobs_4thread, logObject)
 		os.system('touch %s' % step_7_checkpoint_file)
 
 	# Step 8: Running GSeeF, lsaBGC-See and lsaBGC-ComprehenSeeIve
@@ -1000,12 +1008,11 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 	sys.stderr.write(msg + '\n')
 	logObject.info(msg)
 	step_8_checkpoint_file = check_dir + 'Step_8.txt'
-	visual_results_dir = final_dir + 'Visualizations/'
 	gseef_dir = visual_results_dir + 'GSeeF_Results/'
 	see_dir = visual_results_dir + 'lsaBGC_See_Results/'
 	compsee_dir = visual_results_dir + 'lsaBGC_ComprehenSeeIve_Results/'
 	if not os.path.isfile(step_8_checkpoint_file):
-		util.setupReadyDirectory([visual_results_dir, see_dir, compsee_dir])
+		util.setupReadyDirectory([see_dir, compsee_dir])
 		gseef_cmd = ['GSeeF', '-g', detailed_BGC_listing_with_Pop_and_GCF_map_file, '-s', species_tree_file, '-o', gseef_dir]
 		util.runCmdViaSubprocess(gseef_cmd, logObject, check_directories=[gseef_dir])
 		util.runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, species_tree_file, ortholog_matrix_file, 
@@ -1024,8 +1031,8 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 					        multi_thread, parallel_jobs_4thread, logObject)
 		os.system('touch %s' % step_9_checkpoint_file)
 
-	# Step 10: Parallel running of lsaBGC-Reconcile (for horizontal transfer assessment) and lsaBGC-Sociate
-	msg = '--------------------\nStep 10: Running lsaBGC-Reconcile and lsaBGC-Sociate\n--------------------'
+	# Step 10: Parallel running of lsaBGC-Reconcile (for horizontal transfer assessment)
+	msg = '--------------------\nStep 10: Running lsaBGC-Reconcile\n--------------------'
 	sys.stderr.write(msg + '\n')
 	logObject.info(msg)
 	step_10_checkpoint_file = check_dir + 'Step_10.txt'
@@ -1034,23 +1041,37 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 	recon_result_file = recon_dir + 'Orthogroup_Summary_Info.txt'
 	recon_og_result_file = recon_dir + 'Orthogroup_by_Sample_Copy_Count.txt'
 	recon_pop_color_file = recon_scratch_dir + 'pop_colors_mapping.txt'
-	sociate_dir = outdir + 'lsaBGC_Sociate_Results/'
-	sociate_result_file = sociate_dir + 'Final_Sociated_Results.tsv'
 	if not os.path.isfile(step_10_checkpoint_file):
-		util.setupReadyDirectory([recon_dir, recon_scratch_dir, sociate_dir])
+		util.setupReadyDirectory([recon_dir, recon_scratch_dir])
 		lsabgc_reconcile_cmd = ['lsaBGC-Reconcile', '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, '-m', 
 						        ortholog_matrix_file, '-s', species_tree_file, '-o', recon_dir, '-sd', 
 								recon_scratch_dir, '-c', str(threads)]
+		if high_quality_reconcile_flag:
+			lsabgc_reconcile_cmd += ['-q']
 		util.runCmdViaSubprocess(lsabgc_reconcile_cmd, logObject=logObject, check_files=[recon_result_file, 
 																				         recon_og_result_file,
 																						 recon_pop_color_file])
-		lsabgc_sociate_cmd = ['lsaBGC-Sociate', '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, '-m', 
-						        ortholog_matrix_file, '-s', species_tree_file, '-o', sociate_dir, '-c', str(threads)]
-		util.runCmdViaSubprocess(lsabgc_sociate_cmd, logObject=logObject, check_files=[sociate_result_file])
 		os.system('touch %s' % step_10_checkpoint_file)
 	
-	# Step 11: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate results
-	msg = '--------------------\nStep 11: Creating final spreadsheet with all the major results!\n--------------------'
+	# Step 11: Parallel running of lsaBGC-Sociate
+	msg = '--------------------\nStep 11: Running lsaBGC-Sociate\n--------------------'
+	sys.stderr.write(msg + '\n')
+	logObject.info(msg)
+	step_11_checkpoint_file = check_dir + 'Step_11.txt'
+	sociate_dir = outdir + 'lsaBGC_Sociate_Results/'
+	visual_sociated_dir = visual_results_dir + 'lsaBGC_Sociate_Visual_Results/'
+	sociate_result_file = sociate_dir + 'Final_Sociated_Results.tsv'
+	if not os.path.isfile(step_11_checkpoint_file):
+		lsabgc_sociate_cmd = ['lsaBGC-Sociate', '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, '-m', 
+						        ortholog_matrix_file, '-s', species_tree_file, '-o', sociate_dir,
+								'-vo', visual_sociated_dir, '-c', str(threads)]
+		if report_sociate_hits_flag:
+			lsabgc_sociate_cmd += ['-r']
+		util.runCmdViaSubprocess(lsabgc_sociate_cmd, logObject=logObject, check_files=[sociate_result_file])
+		os.system('touch %s' % step_11_checkpoint_file)
+
+	# Step 12: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate results
+	msg = '--------------------\nStep 12: Creating final spreadsheet with all the major results!\n--------------------'
 	sys.stderr.write(msg + '\n')
 	logObject.info(msg)
 

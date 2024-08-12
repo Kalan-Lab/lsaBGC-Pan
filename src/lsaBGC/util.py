@@ -203,7 +203,7 @@ def computeConservationOfOGWithinGCFContext(inputs):
 		sys.stderr.write(traceback.format_exc() + '\n')
 		sys.exit(1)
 
-def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, threads, multi_thread, parallel_jobs_4thread, logObject):
+def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, cgc_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, threads, multi_thread, parallel_jobs_4thread, logObject):
 	try:
 		gcf_sample_bgcs = defaultdict(lambda: defaultdict(list))
 		edgy_bgcs = set([])
@@ -219,6 +219,7 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 					gcf_bgcs[gcf_id].append(bgc_path)
 
 		zol_cmds = []
+		cgc_cmds = []
 		complete_conservation_inputs = []
 	
 		zp = zol_parameters
@@ -241,16 +242,20 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 
 			gcf_full_bgcs_to_input = list(set(gcf_bgcs_to_input).difference(edgy_bgcs))
 			if len(gcf_bgcs_to_input) > 0:
-				zol_comp_cmd = ['zol', '-c', str(multi_thread), '-i', ' '.join(gcf_bgcs_to_input), zp, '-po', ortholog_listing_file, '-o', zol_comp_results_dir + gcf + '/', logObject]
+				zol_comp_cmd = ['zol', '-c', str(multi_thread), '-i', ' '.join(gcf_bgcs_to_input), zp, '-po', ortholog_listing_file, 
+					            '-o', zol_comp_results_dir + gcf + '/', logObject]
+				cgc_comp_cmd = ['cgc', '-i', zol_comp_results_dir + gcf + '/', '-t', 'conservation', 'conservation', 
+					            'entropy', '-c', 'grey', 'white_to_black', 'light_to_dark_green', '-rh', '1.7', 
+								'1', '1', '-sl', '-p', '-sc', '-ld', '0.04', '-lts', '3.0', '-b', '0.5', '-w', '8', 
+								'-o', cgc_results_dir + gcf + '/', logObject]
 				zol_cmds.append(zol_comp_cmd)
+				cgc_cmds.append(cgc_comp_cmd)
 			else:
 				os.mkdir(zol_comp_results_dir + gcf)
 
 			if len(gcf_full_bgcs_to_input) > 0:
 				complete_conservation_input = [gcf_full_bgcs_to_input, ortholog_listing_file, zol_full_results_dir + gcf + '.txt', logObject]
 				complete_conservation_inputs.append(complete_conservation_input)
-				#zol_full_cmd = ['zol', '-c', str(multi_thread), '-i', ' '.join(gcf_full_bgcs_to_input), zp, '-po', ortholog_listing_file,  '-o', zol_full_results_dir + gcf + '/', logObject]
-				#zol_cmds.append(zol_full_cmd)
 			else:
 				os.mkdir(zol_full_results_dir + gcf)
 
@@ -276,8 +281,19 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 			logObject.error(traceback.format_exc())
 			sys.exit(1)
 
+		try:
+			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+				executor.map(multiProcess, cgc_cmds)
+		except:
+			msg = 'Issues with parallel running of cgc commands.'
+			sys.stderr.write(msg + '\n')
+			logObject.error(msg)
+			sys.stderr.write(traceback.format_exc())
+			logObject.error(traceback.format_exc())
+			sys.exit(1)
+
 	except:
-		msg = 'Issues running zol'
+		msg = 'Issues running zol or cgc'
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
 		sys.stderr.write(traceback.format_exc() + '\n')
@@ -1588,7 +1604,6 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 
 
 		# create MIBiG mapping spreadsheet
-
 		mibig_json_tar_url = 'https://dl.secondarymetabolites.org/mibig/mibig_json_3.1.tar.gz'
 		mibig_json_tar_dir = scratch_dir + 'mibig_json_3.1/'
 		mibig_json_tar_file = scratch_dir + 'mibig_json_3.1.tar.gz'
@@ -1691,7 +1706,6 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 										'max_color': "#5a739c", "min_value": 0.0, "max_value": 2.0})		
 
 		# create lsaBGC-sociate spreadsheet
-
 		so_numeric_columns = set(['allele frequency', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 'beta-std-err', 'variant_h2'])
 		so_data = loadTableInPandaDataFrame(sociate_result_file, so_numeric_columns)
 		so_data.to_excel(writer, sheet_name='lsaBGC-Sociate Results', index=False, na_rep="NA")
