@@ -488,6 +488,7 @@ def lsaBGC_Sociate():
         tfh.close()
         plot_inputs.append([fg, species_tree, track_file, rscript_file, plot_file, logObject])
 
+    os.environ["OMP_NUM_THREADS"] = "1"
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
             executor.map(runPlotting, plot_inputs)
@@ -496,7 +497,7 @@ def lsaBGC_Sociate():
         sys.stderr.write(msg)
         sys.stderr.write(traceback.format_exc())
         sys.exit(1)
-
+    os.environ["OMP_NUM_THREADS"] = "4"
 
     # Write checkpoint file 
     checkpoint_file = outdir + 'CHECKPOINT.txt'
