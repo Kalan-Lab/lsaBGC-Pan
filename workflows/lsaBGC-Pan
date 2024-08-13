@@ -51,6 +51,7 @@ import warnings
 import shutil
 
 warnings.filterwarnings('ignore')
+os.environ["OMP_NUM_THREADS"] = "1"
 
 def create_parser():
 	""" Parse arguments """
