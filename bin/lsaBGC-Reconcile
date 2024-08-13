@@ -282,23 +282,12 @@ def lsaBGC_Reconcile():
         sys.exit(1)
 
     trimal_cmds = []
-    fasttree_cmds = []
-    plot_inputs = []
     for bo in bgc_ogs:
         og_prot_msa = bgc_og_protalgn_dir + bo + '.msa.faa'
         og_prot_trim = bgc_og_prottrim_dir + bo + '.msa.trimmed.faa'
-        og_prot_tre = bgc_og_prottree_dir + bo + '.tre'
-        og_track_file = bgc_og_tracks_dir + bo + '.txt'
-        og_rscript_file = bgc_og_visuals_script_dir + bo + '.R'
-        og_pdf_file = bgc_og_visuals_dir + bo + '.pdf'
-
         if os.path.isfile(og_prot_msa) and os.path.getsize(og_prot_msa) > 50:
-            trimal_cmd = ['trimal', '-in', og_prot_msa, '-out', og_prot_trim, '-strict']
-            fasttree_cmd = ['fasttree', og_prot_trim, '>', og_prot_tre]
-            plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject]
+            trimal_cmd = ['trimal', '-in', og_prot_msa, '-out', og_prot_trim]
             trimal_cmds.append(trimal_cmd)
-            fasttree_cmds.append(fasttree_cmd)
-            plot_inputs.append(plot_input)
         else:
             msg = 'Not producing plot for orthogroup %s because protein alignment timed out (>30 minutes)!' % bo
             logObject.warning(msg)
