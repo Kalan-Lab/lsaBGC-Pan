@@ -151,7 +151,8 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 					          '-s', species_tree, '-m', ortholog_matrix_file, '-o', gcf_csi_resdir, logObject]
 			lsabgc_see_and_csi_cmds.append(lsabgc_see_cmd)
 			lsabgc_see_and_csi_cmds.append(lsabgc_csi_cmd)
-			
+
+		os.environ["OMP_NUM_THREADS"] = "1"
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
 				executor.map(multiProcess, lsabgc_see_and_csi_cmds)
@@ -162,7 +163,7 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 			sys.stderr.write(traceback.format_exc())
 			logObject.error(traceback.format_exc())
 			sys.exit(1)
-
+		os.environ["OMP_NUM_THREADS"] = "4"
 	except:
 		msg = 'Issues running lsaBGC-See and lsaBGC-ComprehenSeeIve'
 		logObject.error(msg)
