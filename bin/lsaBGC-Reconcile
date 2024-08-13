@@ -292,7 +292,7 @@ def lsaBGC_Reconcile():
         og_rscript_file = bgc_og_visuals_script_dir + bo + '.R'
         og_pdf_file = bgc_og_visuals_dir + bo + '.pdf'
 
-        if os.path.isfile(og_prot_msa) or os.path.getsize(og_prot_msa) > 50:
+        if os.path.isfile(og_prot_msa) and os.path.getsize(og_prot_msa) > 50:
             trimal_cmd = ['trimal', '-in', og_prot_msa, '-out', og_prot_trim, '-strict']
             fasttree_cmd = ['fasttree', og_prot_trim, '>', og_prot_tre]
             plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject]
@@ -323,7 +323,7 @@ def lsaBGC_Reconcile():
             og_rscript_file = bgc_og_visuals_script_dir + bo + '.R'
             og_pdf_file = bgc_og_visuals_dir + bo + '.pdf'
 
-            if os.path.isfile(og_prot_trim) or os.path.getsize(og_prot_trim) > 50:
+            if os.path.isfile(og_prot_trim) and os.path.getsize(og_prot_trim) > 50:
                 fasttree_cmd = ['fasttree', og_prot_trim, '>', og_prot_tre]
                 plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject]
                 trimal_cmds.append(trimal_cmd)
