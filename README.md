@@ -3,6 +3,7 @@
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/version.svg)](https://anaconda.org/bioconda/lsabgc)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/platforms.svg)](https://anaconda.org/bioconda/lsabgc)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/latest_release_date.svg)](https://anaconda.org/bioconda/lsabgc)
+[![Docker](https://img.shields.io/badge/Docker-DockerHub-darkred?style=flat-square&maxAge=2678400)](https://hub.docker.com/r/raufs/lsabgc_pan)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/downloads.svg)](https://anaconda.org/bioconda/lsabgc)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/license.svg)](https://anaconda.org/bioconda/lsabgc)
 [![Zenodo](https://zenodo.org/badge/DOI/10.5281/zenodo.13309206.svg)](https://doi.org/10.5281/zenodo.13309206)
@@ -10,7 +11,7 @@
 
 ### *lsa*BGC-Pan - *mine the pan-BGC-ome of a microbial taxon for biosynthetic golden nuggets.*
 
-*lsa*BGC-Pan reconfigures [*lsa*BGC](https://github.com/Kalan-Lab/lsaBGC) for easier installation via either Bioconda or Docker (_in progress_) and features a new workflow bearing the same name as the repo. In addition to easier usability, there are some new analytical modules -e.g. (de-)association testing of BGC ortholog groups and GCFs and an improved framework for inferring horizontal transfer. 
+*lsa*BGC-Pan reconfigures [*lsa*BGC](https://github.com/Kalan-Lab/lsaBGC) for easier installation via either Bioconda or Docker and features a new workflow bearing the same name as the repo. In addition to easier usability, there are some new analytical modules -e.g. (de-)association testing of BGC ortholog groups and GCFs and an improved framework for inferring horizontal transfer. 
 
 <p align="center">
 <img src="https://github.com/Kalan-Lab/lsaBGC-Pan/assets/4260723/3aa3426e-39d6-4d25-91a3-44be288a6ad4" width="300">
