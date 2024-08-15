@@ -19,4 +19,4 @@ cd test_case/
 ln -s ../run_lsaBGC-Pan.sh .
 
 # run test
-./run_lsaBGC-Pan.sh -i input_genomes/ -o lsabgc_pan_results/ -nb -c 4
+./run_lsaBGC-Pan.sh -g input_genomes/ -o lsabgc_pan_results/ -nb -c 4
