@@ -1,5 +1,6 @@
 # *lsa*BGC-Pan
 [![Documentation](https://img.shields.io/badge/Documentation-Wiki-darkgreen?style=flat-square&maxAge=2678400)](https://github.com/Kalan-Lab/lsaBGC-Pan/wiki)
+[![Documentation](https://img.shields.io/badge/Installation-limegreen?style=flat-square&maxAge=2678400)](https://github.com/Kalan-Lab/lsaBGC-Pan/wiki)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/version.svg)](https://anaconda.org/bioconda/lsabgc)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/platforms.svg)](https://anaconda.org/bioconda/lsabgc)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/lsabgc/badges/latest_release_date.svg)](https://anaconda.org/bioconda/lsabgc)
