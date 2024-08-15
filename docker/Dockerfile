@@ -9,21 +9,23 @@ LABEL maintainer="Rauf Salamzade - Kalan Lab, UW-Madison"
 WORKDIR /usr/src
 SHELL ["/bin/bash", "-c"]
 
-#  Setup lsaBGC-Pan using Bioconda
+# Clone lsaBGC-Pan v1.1.0 with multiprocessing in place of concurrent.futures from raufs 
+# github repo and create conda environment
 RUN apt-get update && apt-get install -y git wget gcc && \
     conda install -n base conda-libmamba-solver && conda config --set solver libmamba && \
-    conda create -p /usr/src/lsaBGC_conda_env/ -c conda-forge -c bioconda -c defaults lsabgc panaroo && \
+    conda create -p /usr/src/lsaBGC_conda_env/ -c conda-forge -c bioconda lsabgc panaroo && \
     conda clean --all -y && \
     echo "source activate /usr/src/lsaBGC_conda_env/" > ~/.bashrc && source ~/.bashrc && \
     apt-get clean -y && apt-get autoclean -y && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
-# Finish setup and download minimal databases (MIBiG v3.1 + PGAP HMMs)
-WORKDIR /usr/src/lsaBGC/
+# Set env variables and download minimal databases (MIBiG v3.1 + PGAP HMMs)
 ENV PATH /usr/src/lsaBGC_conda_env/bin:$PATH
-RUN setup_annotation_dbs.py -ld && chmod -R 555 /usr/src/lsaBGC_conda_env/ && chmod 777 /home
+ENV ZOL_EXEC_PATH /usr/src/lsaBGC_conda_env/bin/
+ENV ZOL_DATA_PATH /usr/src/lsaBGC_conda_env/share/zol-1.4.12/db/
+RUN setup_annotation_dbs.py -ld && chmod 777 /home
 USER 1000:1000
-RUN mkdir -p /home/input /home/output
+RUN mkdir /home/input /home/output
 WORKDIR /home
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
