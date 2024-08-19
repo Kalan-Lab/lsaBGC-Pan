@@ -497,17 +497,17 @@ def lsaBGC_Sociate():
                 else:
                     wo_focgcf_w_socfeat += 1
 
-	try:
-		assert(len(foc_gcf_samples) > 0)
-	except:
-		msg = 'Issue finding samples with the GCF ' + hit[0] + ' - this should not happen!'
-		sys.stderr.write(msg + '\n')
-		logObject.error(msg)
+        try:
+            assert(len(foc_gcf_samples) > 0)
+        except:
+            msg = 'Issue finding samples with the GCF ' + hit[0] + ' - this should not happen!'
+            sys.stderr.write(msg + '\n')
+            logObject.error(msg)
 
-	w_prop = w_focgcf_w_socfeat / len(foc_gcf_samples)	
-	wo_prop = 0.0
-	if (len(all_samples) - len(foc_gcf_samples)) > 0:
-		wo_prop = wo_focgcf_w_socfeat / (len(all_samples)-len(foc_gcf_samples))
+        w_prop = w_focgcf_w_socfeat / len(foc_gcf_samples)	
+        wo_prop = 0.0
+        if (len(all_samples) - len(foc_gcf_samples)) > 0:
+            wo_prop = wo_focgcf_w_socfeat / (len(all_samples)-len(foc_gcf_samples))
 
         direction = 'positive'
         if w_prop == wo_prop:
