@@ -239,9 +239,9 @@ def GSeeF():
 	logObject.info('\n---------------------\nStep 4\n---------------------\nGenerating final static PDF visualization and iTol track file.')
 	sys.stdout.write('---------------------\nStep 4\n---------------------\nGenerating final static PDF visualization and iTol track file.\n')
 
-	resulting_png = final_results_dir + 'Phylogenetic_Heatmap.png'
-	label_resulting_png = final_results_dir + 'Annotation_Legend.png'
-	runPlotting(outdir, rooted_species_tree_file, gseef_track_file, resulting_png, label_resulting_png, logObject)
+	resulting_pdf = final_results_dir + 'Phylogenetic_Heatmap.pdf'
+	label_resulting_pdf = final_results_dir + 'Annotation_Legend.pdf'
+	runPlotting(outdir, rooted_species_tree_file, gseef_track_file, resulting_pdf, label_resulting_pdf, logObject)
 
 	# Close logging object and exit
 	logObject.info('GSeeF completed! Check out the major results in the folder: %s' % final_results_dir)
@@ -249,7 +249,7 @@ def GSeeF():
 	util.closeLoggerObject(logObject)
 	sys.exit(0)
 
-def runPlotting(workspace, phylo_file, heatmap_file, png_file, legend_png_file, logObject):
+def runPlotting(workspace, phylo_file, heatmap_file, pdf_file, legend_pdf_file, logObject):
 	try:
 		gseef_script = workspace + 'gseef_rscript.R'
 		gs_handle = open(gseef_script, 'w')
@@ -273,7 +273,7 @@ def runPlotting(workspace, phylo_file, heatmap_file, png_file, legend_png_file, 
 		gs_handle.write('gcf_colors <- c(heatmap.data.select$colors)\n')
 		gs_handle.write('names(gcf_colors) <- c(heatmap.data.select$annotation)\n\n')
 
-		gs_handle.write('png("' + png_file + '", height=10, width=20, units="in", res=300)\n')
+		gs_handle.write('pdf("' + pdf_file + '", height=10, width=20)\n')
 		gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')
 		gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = reorder(gcf, gcf_index), y = label, fill = annotation)) +\n') 
 		gs_handle.write('theme_classic() + scale_fill_manual(values=gcf_colors, na.value="white") +\n')
@@ -282,7 +282,7 @@ def runPlotting(workspace, phylo_file, heatmap_file, png_file, legend_png_file, 
 		gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
 		gs_handle.write('dev.off()\n\n')
 
-		gs_handle.write('png("' + legend_png_file + '", height=10, width=5, units="in", res=300)\n')
+		gs_handle.write('pdf("' + legend_pdf_file + '", height=10, width=5)\n')
 		gs_handle.write('my_hist <- ggplot(heatmap.data, aes(x=annotation, y=1, fill = annotation)) + geom_bar(stat="identity") + scale_fill_manual(values=gcf_colors)\n')
 		gs_handle.write('legend <- cowplot::get_legend(my_hist)\n')
 		gs_handle.write('grid.newpage()\n')
@@ -292,7 +292,7 @@ def runPlotting(workspace, phylo_file, heatmap_file, png_file, legend_png_file, 
 		gs_handle.close()
 		
 		rscript_cmd = ['Rscript', gseef_script]
-		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[png_file, legend_png_file])
+		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[pdf_file, legend_pdf_file])
 	except:
 		msg = 'Issues running image creation (which is primarily based on the R library ggtree)'
 		sys.stderr.write(msg + '\n')

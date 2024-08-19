@@ -1722,7 +1722,10 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 										'max_color': "#5a739c", "min_value": 0.0, "max_value": 2.0})		
 
 		# create lsaBGC-sociate spreadsheet
-		so_numeric_columns = set(['allele frequency', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 'beta-std-err', 'variant_h2'])
+		so_numeric_columns = set(['allele frequency', 'frequency in samples with focal GCF', 
+                                  'frequency in samples with focal GCF','pvalue', 
+								  'phylgoenetically corrected pvalue', 'beta', 'beta-std-err', 
+								  'variant_h2'])
 		so_data = loadTableInPandaDataFrame(sociate_result_file, so_numeric_columns)
 		so_data.to_excel(writer, sheet_name='lsaBGC-Sociate Results', index=False, na_rep="NA")
 		so_sheet =  writer.sheets['lsaBGC-Sociate Results']

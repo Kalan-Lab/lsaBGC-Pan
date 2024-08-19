@@ -297,6 +297,10 @@ def lsaBGC_Sociate():
         sys.stderr.write(traceback.format_exc())
         sys.exit(1)
 
+    """
+    # Bonferonni correction no longer performed per focal GCF - feature type
+    # but rather comprehensively.    
+
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
             executor.map(util.multiProcessNoLog, count_cmds)
@@ -319,21 +323,32 @@ def lsaBGC_Sociate():
                 if line.startswith('Threshold:'):
                     pval_threshold = float(line.split()[1])
                     gcf_pval_thresholds[gcf][type] = pval_threshold
+    """
+
+    tot_tests = 0
+    for f in os.listdir(pyseer_results_dir):
+        with open(pyseer_results_dir + f) as oprf:
+            for i, line in enumerate(oprf):
+                if i == 0: continue
+                tot_tests += 1
+
+    mt_cor_alpha = 0.05/tot_tests
 
     hits = []
     sociated_ogs = set([])
     for f in os.listdir(pyseer_results_dir):
         gcf = '_'.join(f.split('_')[:2])
-        type = 'OG'
+        soc_type = 'OG'
         if f.endswith('_GCF_Results.txt'):
-            type = 'GCF'
+            soc_type = 'GCF'
         with open(pyseer_results_dir + f) as ogcf:
             for i, line in enumerate(ogcf):
                 if i == 0: continue
                 line = line.strip('\n')
                 ls = line.split('\t')
                 lrt_pval = float(ls[3])
-                if lrt_pval <= gcf_pval_thresholds[gcf][type]:
+                #if lrt_pval <= gcf_pval_thresholds[gcf][soc_type]:
+                if lrt_pval <= mt_cor_alpha:
                     if report_hits_with_notes_flag or ls[-1] == '':
                         genotype = ls[0]
                         if genotype != gcf and not genotype in gcf_ogs[gcf]:
@@ -341,11 +356,11 @@ def lsaBGC_Sociate():
                             sociated_ogs.add(ls[0])
 
     # Step 6: Annotate associated/disassociated orthogroups
-    bgc_og_protseq_dir = outdir + 'BGC_OG_Protein_Seqs/'
-    bgc_og_protalgn_dir = outdir + 'BGC_OG_Protein_Alignments/'
-    bgc_og_hmm_dir = outdir + 'BGC_OG_Protein_HMMs/'
-    bgc_og_consensus_dir = outdir + 'BGC_OG_Protein_Consensus_Sequences/'
-    util.setupReadyDirectory([bgc_og_protseq_dir, bgc_og_protalgn_dir, bgc_og_hmm_dir, bgc_og_consensus_dir])
+    soc_og_protseq_dir = outdir + 'Sociated_OG_Protein_Seqs/'
+    soc_og_protalgn_dir = outdir + 'Sociated_OG_Protein_Alignments/'
+    soc_og_hmm_dir = outdir + 'Sociated_OG_Protein_HMMs/'
+    soc_og_consensus_dir = outdir + 'Sociated_OG_Protein_Consensus_Sequences/'
+    util.setupReadyDirectory([soc_og_protseq_dir, soc_og_protalgn_dir, soc_og_hmm_dir, soc_og_consensus_dir])
     
     with open(lsabgc_detailed_listing) as oldlf:
         for i, line in enumerate(oldlf):
@@ -362,15 +377,16 @@ def lsaBGC_Sociate():
                         og = lt_to_og[lt]
                         if og in sociated_ogs:
                             prot_seq = feat.qualifiers.get('translation')[0]
-                            prot_faa = bgc_og_protseq_dir + og + '.faa'
+                            prot_faa = soc_og_protseq_dir + og + '.faa'
                             pf_handle = open(prot_faa, 'a+')
                             pf_handle.write('>' + sample + '|' + lt + '\n' + prot_seq + '\n')
                             pf_handle.close()
 
     muscle_cmds = []
     for og in sociated_ogs:
-        og_prot_faa = bgc_og_protseq_dir + og + '.faa'
-        og_prot_msa = bgc_og_protalgn_dir + og + '.msa.faa'
+        if og.startswith('GCF'): continue
+        og_prot_faa = soc_og_protseq_dir + og + '.faa'
+        og_prot_msa = soc_og_protalgn_dir + og + '.msa.faa'
 
         muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread), timeout_time]
         muscle_cmds.append(muscle_cmd)
@@ -388,10 +404,10 @@ def lsaBGC_Sociate():
     hmmemit_cmds = []
     annotation_notes = defaultdict(lambda: '')
     for og in sociated_ogs:
-        og_prot_faa = bgc_og_protseq_dir + og + '.faa'
-        og_prot_msa = bgc_og_protalgn_dir + og + '.msa.faa'
-        og_prot_hmm = bgc_og_hmm_dir + og + '.hmm'
-        og_prot_con = bgc_og_consensus_dir + og + '.faa'
+        og_prot_faa = soc_og_protseq_dir + og + '.faa'
+        og_prot_msa = soc_og_protalgn_dir + og + '.msa.faa'
+        og_prot_hmm = soc_og_hmm_dir + og + '.hmm'
+        og_prot_con = soc_og_consensus_dir + og + '.faa'
 
         if os.path.isfile(og_prot_msa) and os.path.getsize(og_prot_msa) > 50:
             hmmbuild_cmd = ['hmmbuild', '--amino', '--cpu', '1', '-n', og, og_prot_hmm, og_prot_msa]
@@ -424,10 +440,10 @@ def lsaBGC_Sociate():
     consensus_results_file = outdir + 'Sociated_OGs_Consensus_Sequences.faa'
     crf_handle = open(consensus_results_file, 'w')
     con_seqs = 0
-    for f in os.listdir(bgc_og_consensus_dir):
+    for f in os.listdir(soc_og_consensus_dir):
         og = f.split('.faa')[0]
         con_seqs += 1
-        with open(bgc_og_consensus_dir + f) as ocf:
+        with open(soc_og_consensus_dir + f) as ocf:
             for rec in SeqIO.parse(ocf, 'fasta'):
                 crf_handle.write('>' + og + '\n' + str(rec.seq) + '\n')
     crf_handle.close()
@@ -452,7 +468,8 @@ def lsaBGC_Sociate():
 
     final_result_tsv = outdir + 'Final_Sociated_Results.tsv'
     frt = open(final_result_tsv, 'w')
-    header = ['focal GCF', 'assocaited GCF/OG', 'allele frequency', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 
+    header = ['focal GCF', 'assocaited GCF/OG', 'allele frequency', 'direction', 'frequency in samples with focal GCF',
+              'frequency in samples with focal GCF', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 
               'beta-std-err', 'variant_h2', 'notes', 'annotation notes', 'KO Annotation (E-value)', 'PGAP Annotation (E-value)', 
               'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)', 'IS Finder (E-value)', 
               'MI-BiG Annotation (E-value)', 'VOG Annotation (E-value)',  'VFDB Annotation (E-value)', 'Pfam Domains']
@@ -462,18 +479,43 @@ def lsaBGC_Sociate():
         foc_gcf = hit[0]
         foc_gcfs_with_hits.add(foc_gcf)
         track_file = track_dir + foc_gcf + '.txt'
-        beta_cat = 'positive'
-        if float(hit[5]) < 0:
-            beta_cat = 'negative'
+        
+        foc_gcf_samples = gcf_samples[hit[0]]
+
+        w_focgcf_w_socfeat = 0
+        wo_focgcf_w_socfeat = 0
+        if hit[1].startswith('GCF'):  
+            for s in gcf_samples[hit[1]]:
+                if s in foc_gcf_samples:
+                    w_focgcf_w_socfeat += 1
+                else:
+                    wo_focgcf_w_socfeat += 1
+        else:
+            for s in og_samples[hit[1]]:
+                if s in foc_gcf_samples:
+                    w_focgcf_w_socfeat += 1
+                else:
+                    wo_focgcf_w_socfeat += 1
+
+        w_prop = w_focgcf_w_socfeat / len(foc_gcf_samples)
+        wo_prop = wo_focgcf_w_socfeat / (len(all_samples)-len(foc_gcf_samples))
+
+        direction = 'positive'
+        if w_prop == wo_prop:
+            direction = '-'
+        elif w_prop < wo_prop:
+            direction = 'negative'
+    
         tfh = open(track_file, 'a+')
         if hit[1].startswith('GCF'):  
-            for s in gcf_samples[hit[1]]:          
-                tfh.write('\t'.join([hit[1], s, hit[4], beta_cat]) + '\n')
+            for s in gcf_samples[hit[1]]:
+                tfh.write('\t'.join([hit[1], s, hit[4], direction]) + '\n')
         else:
             for s in og_samples[hit[1]]:          
-                tfh.write('\t'.join([hit[1], s, hit[4], beta_cat]) + '\n')
+                tfh.write('\t'.join([hit[1], s, hit[4], direction]) + '\n')
         tfh.close()
-        frt.write('\t'.join(hit + [annotation_notes[hit[1]]] + soc_og_annotations[hit[1]]) + '\n')
+
+        frt.write('\t'.join(hit[:3] + [direction, w_prop, wo_prop] +  hit[3:] + [annotation_notes[hit[1]]] + soc_og_annotations[hit[1]]) + '\n')
 
     frt.close()
 
@@ -530,8 +572,8 @@ def runPlotting(inputs):
 
         gs_handle.write('heatmap.data <- read.table("' + track_file + '", header=F, sep="\\t")\n')
         gs_handle.write('colnames(heatmap.data) <- c("allele", "label", "order", "value")\n')
-        gs_handle.write('colors <- c("#242424", "#4b7dc9", "#db6588")\n')
-        gs_handle.write('names(colors) <- c("focal", "positive", "negative")\n\n')
+        gs_handle.write('colors <- c("#242424", "#6f7070", "#4b7dc9", "#db6588")\n')
+        gs_handle.write('names(colors) <- c("focal", "-", "positive", "negative")\n\n')
 
         gs_handle.write('pdf("' + pdf_file + '", height=10, width=20)\n')
         gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')   
