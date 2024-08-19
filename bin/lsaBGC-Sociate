@@ -515,7 +515,7 @@ def lsaBGC_Sociate():
                 tfh.write('\t'.join([hit[1], s, hit[4], direction]) + '\n')
         tfh.close()
 
-        frt.write('\t'.join(hit[:3] + [direction, w_prop, wo_prop] +  hit[3:] + [annotation_notes[hit[1]]] + soc_og_annotations[hit[1]]) + '\n')
+        frt.write('\t'.join(hit[:3] + [direction, str(w_prop), str(wo_prop)] +  hit[3:] + [annotation_notes[hit[1]]] + soc_og_annotations[hit[1]]) + '\n')
 
     frt.close()
 
