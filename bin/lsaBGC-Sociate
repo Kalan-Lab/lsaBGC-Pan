@@ -469,7 +469,7 @@ def lsaBGC_Sociate():
     final_result_tsv = outdir + 'Final_Sociated_Results.tsv'
     frt = open(final_result_tsv, 'w')
     header = ['focal GCF', 'assocaited GCF/OG', 'allele frequency', 'direction', 'frequency in samples with focal GCF',
-              'frequency in samples with focal GCF', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 
+              'frequency in samples without focal GCF', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 
               'beta-std-err', 'variant_h2', 'notes', 'annotation notes', 'KO Annotation (E-value)', 'PGAP Annotation (E-value)', 
               'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)', 'IS Finder (E-value)', 
               'MI-BiG Annotation (E-value)', 'VOG Annotation (E-value)',  'VFDB Annotation (E-value)', 'Pfam Domains']
