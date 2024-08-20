@@ -156,7 +156,7 @@ def create_parser():
 	# considering adding future argument for focal population definition in zol based on ID determined by popstrat
 
 	parser.add_argument('-hqr', '--high-quality-reconcile', action='store_true', help="Perform high-quality alignment for reconcile analysis.", required=False, default=False)
-	parser.add_argument('-rsh', '--report-sociate-hits', action='store_true', help="Report signficant pyseer hits with 'notes' - usually\nindicate some general issue - should be examined with caution:\nhttps://pyseer.readthedocs.io/en/master/usage.html#notes-field.", required=False, default=False)
+	parser.add_argument('-rash', '--report-all-sociate-hits', action='store_true', help="Report all signficant pyseer hits with 'notes' - usually\nindicate some general issue - should be examined with caution:\nhttps://pyseer.readthedocs.io/en/master/usage.html#notes-field.", required=False, default=False)
 	parser.add_argument('-at', '--alignment-timeout', type=float, help="The timeout in seconds for constructing proteins alignments using\nMUSCLE during lsaBGC-Reconcile and lsaBGC-Sociate - to prevent long\nruns due to stragglers/abnormally large orthogroups [Default is\n1800 (30 minutes)].", required=False, default=1800)
 
 	parser.add_argument('-py', '--use-prodigal', action='store_true', help='Use prodigal instead of pyrodigal (only if genomes are provided - not\nrelevant if antiSMASH results provided).', required=False, default=False)
@@ -213,7 +213,7 @@ def lsaBGC():
 	zol_keep_multi_copy = myargs.zol_keep_multi_copy
 	
 	high_quality_reconcile_flag = myargs.high_quality_reconcile
-	report_sociate_hits_flag = myargs.report_sociate_hits
+	report_sociate_hits_flag = myargs.report_all_sociate_hits
 	alignment_timeout = myargs.alignment_timeout
 
 	threads = myargs.threads
