@@ -59,7 +59,7 @@ def create_parser():
 	high-quality mode uses muscle align instead of super5 and IQ-TREE with substitution models limited to LG, WAG.
 	""", formatter_class=argparse.RawTextHelpFormatter)
 
-	parser.add_argument('-m', '--orthogroup_matrix', help='BiG-SCAPE Results directory.', required=False, default=None)
+	parser.add_argument('-m', '--orthogroup_matrix', help='Processed OrthoGroup by sample matrix.', required=False, default=None)
 	parser.add_argument('-i', '--genome_genbanks', help='A listing connecting sample names to full-genome GenBank files.', required=False, default=None)
 	parser.add_argument('-p', '--core_proportion', type=float, help='Proportion of genomes with single-copy orthogroup needed to be considered as part of core and used for phylogeny construction [Default is 1.0].', required=False, default=1.0)
 	parser.add_argument('-mg', '--max_genes', type=int, help='The maximum number of single-copy core/near-core orthogroups to use for phylogeny building [Default is 500].', required=False, default=500)
