@@ -64,7 +64,7 @@ def create_parser():
 	""", formatter_class=argparse.RawTextHelpFormatter)
 
 	parser.add_argument('-g', '--lsabgc_detailed_listing', help='lsaBGC-Pan detailed listing with GCF and population structure information.', required=True)
-	parser.add_argument('-s', '--species_tree', help='Provide species tree in Newick format. If not provided will run GToTree to generate species phylogeny.', required=True)
+	parser.add_argument('-s', '--species_tree', help='Provide species tree in Newick format.', required=True)
 	parser.add_argument('-o', '--output_directory', help='Parent output/workspace directory.', required=True)
 	parser.add_argument('-m', '--max_gcfs', type=int, help='The maximum number of GCFs to consider (will prioritize inclusion of more common GCFs). (Default is no limit).', default=None, required=False)
 
