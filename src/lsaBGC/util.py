@@ -23,6 +23,19 @@ version = pkg_resources.require("lsaBGC-Pan")[0].version
 valid_alleles = set(['A', 'C', 'G', 'T'])
 
 def reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject):
+	"""
+	Description:
+	Function to reformat sample by ortholog group matrix to a format that can be fed into zol directly as precomputed.
+	********************************************************************************************************************
+	Parameters:
+	- ortholog_matrix_file: Path to sample by ortholog matrix file.
+	- zol_results_dir: The workspace where to write the resulting re-formatted ortholog info file.
+	- logObject: A python logging object
+	********************************************************************************************************************
+	Returns:
+	- ortholog_listing_file: Path to the reformatted ortholog information file in table format.
+	********************************************************************************************************************
+	"""
 	ortholog_listing_file = zol_results_dir + 'LocusTag_to_Ortholog_Relations.txt'
 	try:
 		outf = open(ortholog_listing_file, 'w')
@@ -46,6 +59,23 @@ def reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject):
 		sys.exit(1)
 
 def determineNonRepBGCs(sample, gcf, sample_gcf_bgcs, gcf_bgcs, bgc_pairwise_relations, edgy_bgcs, logObject):
+	"""
+	Description:
+	Determine which BGC instances to retain for zol analysis for sample with multiple copies of a single GCF.
+	********************************************************************************************************************
+	Parameters:
+	- sample: sample name
+	- gcf: GCF identifier
+	- sample_gcf_bgcs: The set of all BGC instances for the sample-GCF pairing.
+	- gcf_bgcs: The set of all BGC instances for the GCF.
+	- bgc_pairwise_relations: A dictionary with sequence differences between pairs of BGCs.
+	- edgy_bgcs: The set of BGCs which are near scaffold/contig edges.
+	- logObject: A python logging object
+	********************************************************************************************************************
+	Returns:
+	- nonrep_bgcs: The set of non-representative BGCs for the sample-GCF pairing determined.
+	********************************************************************************************************************
+	"""
 	try:
 		complete_bgcs = []
 		for sample_bgc in sample_gcf_bgcs:
@@ -98,6 +128,21 @@ def determineNonRepBGCs(sample, gcf, sample_gcf_bgcs, gcf_bgcs, bgc_pairwise_rel
 
 
 def runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matrix_file, mibig_dir, multi_thread, parallel_jobs_4thread, logObject):
+	"""
+	Description:
+	Void wrapper function to run lsaBGC-MIBiGMapper for all GCFs in parallel. 
+	********************************************************************************************************************
+	Parameters:
+	- detailed_BGC_listing_with_pop_and_GCF_map_file: The detailed BGC listing file produced in lsaBGC-Pan with much of 
+	                                                  the information for sample mapping, GCF mapping, and context of 
+													  each BGC.
+	- ortholog_matrix_file: The sample by ortholog matrix.
+	- mibig_dir: The results directory where to write lsaBGC-MIBiGMapper results to. 
+	- multi_threads: The number of threads per job.
+	- parallel_jobs_4thread: The number of parallel jobs to run whereby each is assumed to be using 4 threads.
+	- logObject: A python logging object
+	********************************************************************************************************************
+	"""
 	try:
 		gcfs = set([])
 		with open(detailed_BGC_listing_with_Pop_and_GCF_map_file) as odbl:
@@ -132,6 +177,22 @@ def runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matr
 		sys.exit(1)
 
 def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, species_tree, ortholog_matrix_file, see_dir, compsee_dir, threads, logObject):
+	"""
+	Description:
+	Void wrapper function to run lsaBGC-See and lsaBGC-ComprehenSeeIve for all GCFs in parallel. 
+	********************************************************************************************************************
+	Parameters:
+	- detailed_BGC_listing_with_pop_and_GCF_map_file: The detailed BGC listing file produced in lsaBGC-Pan with much of 
+	                                                  the information for sample mapping, GCF mapping, and context of 
+													  each BGC.
+	- species_tree: A species tree in Newick format.
+	- ortholog_matrix_file: The sample by ortholog matrix.
+	- see_dir: The results directory where to write lsaBGC-See results to. 
+	- compsee_dir: The results directory where to write lsaBGC-ComprehenSeeIve results to.
+	- threads: The number of parallel jobs to run whereby each is assumed to be using 1 thread.
+	- logObject: A python logging object
+	********************************************************************************************************************
+	"""
 	try:
 		gcfs = set([])
 		with open(detailed_BGC_listing_with_Pop_and_GCF_map_file) as odbl:
@@ -172,6 +233,18 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 		sys.exit(1)
 
 def computeConservationOfOGWithinGCFContext(inputs):
+	"""
+	Description:
+	Void function which computes the conservation of an orhtogroup across BGC instances within a GCF. 
+	********************************************************************************************************************
+	Parameters:
+	- inputs: A list for four items:
+		- bgc_paths: A list of BGC paths belonging to the focal GCF.
+		- og_listing_file: The locus tag to orthogroup mapping table.
+		- output_file: The output file which maps orthogroups to their conservation.
+		- logObject: A python logging object.
+	********************************************************************************************************************
+	"""
 	bgc_paths, og_listing_file, output_file, logObject = inputs
 	
 	try:
@@ -205,6 +278,30 @@ def computeConservationOfOGWithinGCFContext(inputs):
 		sys.exit(1)
 
 def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file, pairwise_relations, zol_comp_results_dir, zol_full_results_dir, cgc_results_dir, zol_parameters, zol_high_quality_preset, zol_edge_distance, zol_keep_multi_copy, threads, multi_thread, parallel_jobs_4thread, logObject):
+	"""
+	Description:
+	Void wrapper function to run zol for all GCFs in parallel. 
+	********************************************************************************************************************
+	Parameters:
+	- detailed_BGC_listing_with_pop_and_GCF_map_file: The detailed BGC listing file produced in lsaBGC-Pan with much of 
+	                                                  the information for sample mapping, GCF mapping, and context of 
+													  each BGC.
+	- ortholog_listing_file: The locus tag to orthogroup mapping table.
+	- pairwise_relations: A dictionary with pairwise relations between pairs of BGCs
+	- zol_comp_results_dir: The results directory where to write zol comprehensive results to. 
+	- zol_full_results_dir: The results directory where to write orthogroup conservations to based on full/complete BGC
+	                        instances belonging to a GCF.
+	- cgc_results_dir: The results directory where to write cgc results to.
+	- zol_parameters: The parameters with which to run zol analysis. 
+	- zol_high_quality_preset: Flag for whether to run a more full/high-quality zol analysis.
+	- zol_edge_distance: The distance from the edge of a contig/scaffold for a BGC instance to be considered partial.
+	- zol_keep_multi_copy: Flag for whether to retain multi-copy instances of a GCF per sample.
+	- threads: The number of parallel jobs to run assuming each job uses 1 thread.
+	- multi_thread: The number of threads to use per multi-threaded job - typically hardcoded to 4.
+	- parallel_jobs_4thread: The number of parallel jobs to run assuming each job uses 4 threads.
+	- logObject: A python logging object.
+	********************************************************************************************************************
+	"""
 	try:
 		gcf_sample_bgcs = defaultdict(lambda: defaultdict(list))
 		edgy_bgcs = set([])
@@ -302,6 +399,17 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 
 
 def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[]):
+	"""
+	Description:
+	Void function to run a command using python's subprocess. 
+	********************************************************************************************************************
+	Parameters:
+	- cmd: A list corresponding to a command.
+	- logObject [optional]: A python logging object.
+	- check_files [optional]: A list of files to simply check are made after running the command.
+	- check_directories [optional]: A list of directories to simply check are made after running the command.
+	********************************************************************************************************************
+	"""
 	if logObject != None:
 		logObject.info('Running %s' % ' '.join(cmd))
 	try:
@@ -321,6 +429,16 @@ def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[
 
 
 def mapColorsToCategories(categories_set, colors_file, colors_mapping_file):
+	"""
+	Description:
+	Void function to map colors to categories for various plotting purposes.
+	********************************************************************************************************************
+	Parameters:
+	- categories_set: Set of categories to have colors assigned to.
+	- colors_file: A file where each line corresponds to a hex code for a color.
+	- colors_mapping_file: The result file where the first column has a category and the second the mapped color.
+	********************************************************************************************************************
+	"""
 	try:
 		colors = []
 		with open(colors_file) as ocf:
@@ -343,6 +461,18 @@ def mapColorsToCategories(categories_set, colors_file, colors_mapping_file):
 		sys.exit(1)
 
 def pairwiseDistancesFromTree(tree_file, logObject):
+	"""
+	Description:
+	Function to compute the branch distance between leafs in a newick tree.
+	********************************************************************************************************************
+	Parameters:
+	- tree_file: The input tree file in Newick format.
+	- logObject: a python logging object
+	********************************************************************************************************************
+	Returns:
+	-  pairwise_distances: A dictionary showing branch distances between pairs of leafs.
+	********************************************************************************************************************
+	"""
 	pairwise_distances = defaultdict(lambda: defaultdict(lambda: None))
 	try:
 		try:
@@ -373,6 +503,18 @@ def pairwiseDistancesFromTree(tree_file, logObject):
 		sys.exit(1)
 
 def generateColors(workspace, outfile, color_count, palette='Spectral', palette_color_count=12):
+	"""
+	Description:
+	Void function to generate an output file with colors in hex code for various plotting purposes.
+	********************************************************************************************************************
+	Parameters:
+	- workspace: The workspace where to write temporary files and scripts.
+	- outfile: The output file where hex codes of colors will be written to.
+	- color_count: The count of desired colors.
+	- palette [Optional]: The color palette in R to use.
+	- palette_color_count [Optional]: The color palette's default color count.
+	********************************************************************************************************************
+	"""
 	try:
 		assert(os.path.isdir(workspace))
 		workspace = os.path.abspath(workspace) + '/'
@@ -393,6 +535,14 @@ def generateColors(workspace, outfile, color_count, palette='Spectral', palette_
 		sys.exit(1)
 
 def parseCDSCoord(str_gbk_loc):
+	"""
+	Description:
+	Function to parse a string from a GenBank feature's coordinates.
+	********************************************************************************************************************
+	Parameters:
+	- str_gbk_loc: The string value of the feature coordinate from a GenBank file being parsed by Biopython.
+	********************************************************************************************************************
+	"""
 	try:
 		start = None
 		end = None
@@ -449,6 +599,18 @@ def parseCDSCoord(str_gbk_loc):
 		raise RuntimeError(traceback.format_exc())
 
 def cleanUpSampleName(original_name):
+	"""
+	Description:
+	Function to clean up a string corresponding to some name to make it easier to write files referencing.
+	********************************************************************************************************************
+	Parameters:
+	- name: A string corresponding to some name.
+	********************************************************************************************************************
+	Returns:
+	-  cleaned_up_name: A cleaned up string where troublesome characters for having as part of fielnames are replaced 
+	                    with less problematic characters.
+	********************************************************************************************************************
+	"""
 	return original_name.replace('#', '').replace('*', '_').replace(':', '_').replace(';', '_').replace(' ',
 																										'_').replace(
 		':', '_').replace('|', '_').replace('"', '_').replace("'", '_').replace("=", "_").replace('-', '_').replace('(',
@@ -456,6 +618,18 @@ def cleanUpSampleName(original_name):
 		')', '').replace('/', '').replace('\\', '').replace('[', '').replace(']', '').replace(',', '')
 
 def parseGECCOGBKForFunction(bgc_gbk, logObject):
+	"""
+	Description:
+	Function to parse GECCO BGC GenBank for product function
+	********************************************************************************************************************
+	Parameters:
+	- bgc_gbk: The GECCO BGC GenBank file path.
+	- logObject: a python logging object
+	********************************************************************************************************************
+	Returns:
+	-  product: The predicted product/type of BGC by GECCO.
+	********************************************************************************************************************
+	"""	
 	try:
 		rec = SeqIO.read(bgc_gbk, 'genbank')
 		product = 'unknown'
@@ -474,6 +648,18 @@ def parseGECCOGBKForFunction(bgc_gbk, logObject):
 		raise RuntimeError()
 
 def parseAntiSMASHGBKForFunction(bgc_gbk, logObject, compress_multi=True):
+	"""
+	Description:
+	Function to parse antiSMASH BGC GenBank for product function.
+	********************************************************************************************************************
+	Parameters:
+	- bgc_gbk: The antiSMASH BGC GenBank file path.
+	- logObject: a python logging object.
+	********************************************************************************************************************
+	Returns:
+	-  product: The predicted product(s)/type(s) of BGC by antiSMASH.
+	********************************************************************************************************************
+	"""	
 	product = 'unknown'
 	try:
 		products = set([])
@@ -501,15 +687,19 @@ def parseAntiSMASHGBKForFunction(bgc_gbk, logObject, compress_multi=True):
 
 def parseOrthoFinderMatrix(orthofinder_matrix_file, relevant_gene_lts, all_primary=False):
 	"""
+	Description:	
 	Function to parse and return information from OrthoFinderV2 de novo homolog group identification.
-
-	:param orthofinder_matrix: OrthoFinderV2 matrix Orthogroups.csv file
-	:param relevant_gene_lts: set of all the relevant gene locus tag identifiers found in BGC Genbanks
-
-	:return gene_to_hg: dictionary mapping gene locus tags to homolog group
-	:return hg_genes: dictionary with set of gene locus tags for each homolog group
-	:return hg_median_gene_counts: median copy count for each homolog group
-	:return hg_multicopy_proportion: proportion of samples with homolog group which have multiple (paralogous) genes in the homolog group.
+	********************************************************************************************************************
+	Parameters:
+	- orthofinder_matrix: OrthoFinderV2 matrix Orthogroups.csv file
+	- relevant_gene_lts: set of all the relevant gene locus tag identifiers found in BGC Genbanks
+	********************************************************************************************************************
+	Return:
+	- gene_to_hg: dictionary mapping gene locus tags to homolog group
+	- return hg_genes: dictionary with set of gene locus tags for each homolog group
+	- return hg_median_gene_counts: median copy count for each homolog group
+	- return hg_multicopy_proportion: proportion of samples with homolog group which have multiple (paralogous) genes in the homolog group.
+	********************************************************************************************************************
 	"""
 	gene_to_hg = {}
 	hg_genes = defaultdict(set)
@@ -543,8 +733,15 @@ def parseOrthoFinderMatrix(orthofinder_matrix_file, relevant_gene_lts, all_prima
 
 def run_cmd(cmd, logObject, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL):
 	"""
-	Simple function to run a single command through subprocess with logging.
+	Description:
+	Void simple function to run a single command through subprocess with logging.
+	********************************************************************************************************************
+	Parameters:
+	- cmd: A list corresponding to a command.
+	- logObject: A python logging object.
+	********************************************************************************************************************
 	"""
+
 	logObject.info('Running the following command: %s' % ' '.join(cmd))
 	try:
 		subprocess.call(' '.join(cmd), shell=True, stdout=stdout, stderr=stderr, executable='/bin/bash')
@@ -556,8 +753,15 @@ def run_cmd(cmd, logObject, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 
 def multiProcessNoLogWithTimeout(input):
 	"""
-	Genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
-	to space separated command (as list).
+	Description:
+	Void, genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
+	to space separated command (as list). Similar to more general function, only this one times out after a while.
+	********************************************************************************************************************
+	Parameters:
+	- input:
+		- input_cmd: Up to last item the input should correspond to the command to run in subprocess. 
+		- TIMEOUT: The last item in the list should correspond to the timeout in seconds.
+	********************************************************************************************************************
 	"""
 	input_cmd = input[:-1]
 	TIMEOUT = input[-1] 
@@ -571,8 +775,13 @@ def multiProcessNoLogWithTimeout(input):
 
 def multiProcessNoLog(input_cmd):
 	"""
-	Genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
-	to space separated command (as list).
+	Description:
+	Void, genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
+	to space separated command (as list). Same as the generalizable function, only this one doesn't take a log object
+	as part of the input.
+	********************************************************************************************************************
+	Parameters:
+	- input_cmd: A list corresponding to an input command.
 	"""
 	try:
 		subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -582,9 +791,16 @@ def multiProcessNoLog(input_cmd):
 
 def multiProcess(input):
 	"""
-	Genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
+	Descirption:
+	Void, genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
 	to space separated command (as list), with last item in list corresponding to a logging object handle for logging
 	progress.
+	********************************************************************************************************************
+	Parameters: 
+	- input: 
+		- input_cmd: Up to last item the input should correspond to the command to run in subprocess.
+		- logObject: The last item in the list should correspond to a python logging object.
+	********************************************************************************************************************
 	"""
 	input_cmd = input[:-1]
 	logObject = input[-1]
@@ -599,6 +815,21 @@ def multiProcess(input):
 		sys.stderr.write(traceback.format_exc())
 
 def addLocusTagsToGBKs(inputs):
+	"""
+	Description:
+	Void function add locus tags to a sample's genome and BGC GenBank files.
+	********************************************************************************************************************
+	Parameters:
+	- inputs:
+		- sample: The sample name.
+		- locus_tag_prefix: The locus tag prefix to use.
+		- resdir: The results directory to write the updated GenBank files to.
+		- genome_gbk: The genome GenBank file to process.
+		- region_gbks: The BGC region GenBank files to process.
+		- keep_ids_flag: A flag variable on whether to attempt to keep the original locus tags.
+		- logObject: a python logging object.
+	********************************************************************************************************************
+	"""
 	sample = inputs[0]
 	locus_tag_prefix = inputs[1]
 	resdir = inputs[2]
@@ -702,6 +933,19 @@ def addLocusTagsToGBKs(inputs):
 		logObject.warning(traceback.format_exc())
 
 def checkCDSHaveLocusTags(inputs):
+	"""
+	Descrption:
+	Void function to check if all CDS features in a GenBank file have locus_tag qualifiers.
+	********************************************************************************************************************
+	Parameters:
+	- inputs:
+		- sample: The sample name.
+		- gbk_type: The type of the GenBank file.
+		- gbk: The input GenBank file.
+		- outf: A file to write stats on CDS count and whether they all had locus tags. 
+		- logObject: a python logging object.
+	******************************************************************************************************************** 
+	"""
 	sample, gbk_type, gbk, outf, logObject = inputs
 	try:
 		cds_count = 0
@@ -727,6 +971,18 @@ def checkCDSHaveLocusTags(inputs):
 		logObject.warning(traceback.format_exc())
 
 def findAntiSMASHBGCInFullGenbank(inputs):
+	"""
+	Description:
+	Void function to parse antiSMASH BGC GenBank from antiSMASH to determine the location/coordinates of it in the 
+	genome.
+	********************************************************************************************************************
+	Parameters:
+	- inputs:
+		- full_gbk: The full genome GenBank file.
+		- bgc_gbk: The antiSMASH BGC GenBank file.
+		- outf: The output file where to write information on BGC location to.
+	********************************************************************************************************************
+	"""
 	try:
 		full_gbk, bgc_gbk, outf = inputs
 
@@ -761,6 +1017,20 @@ def findAntiSMASHBGCInFullGenbank(inputs):
 		raise RuntimeWarning(traceback.format_exc())
 
 def processAntiSMAHSBGCtoGenomeMappingResults(process_data, logObject):
+	"""
+	Definition:
+	Function to process antiSMASH BGC to genome mapping results and return the info as a list.
+	********************************************************************************************************************
+	Parameters:
+	- process_data: A list of lists containing paths to files with BGC to genome mapping information.
+	- logObject: A python logging object.
+	********************************************************************************************************************
+	Returns:
+	- bgc_locations: A list of lists where the first item in a sublist is the bgc identifier/path followed by which 
+	                 sample it belongs to, the scaffold it is on, the start and end coordinates, the length of the bgc,
+					 and the distance of the BGC start/end to the nearest scaffold edge.
+	********************************************************************************************************************
+	"""
 	try:
 		loc_lists = defaultdict(list)
 		for	pd in process_data:
@@ -793,6 +1063,17 @@ def processAntiSMAHSBGCtoGenomeMappingResults(process_data, logObject):
 		sys.exit(1)
 
 def extractProteinsFromGenBank(inputs):
+	"""
+	Definition:
+	Void function to extract protein sequences from CDS features in a GenBank file and output in FASTA format.
+	********************************************************************************************************************
+	Parameters:
+	- inputs:
+		- input_genbank: The input GenBank file with CDS features and translation + locus_tag qualifiers 
+		- output_proteome:	The output FASTA proteome file
+		- logObject: A python logging object
+	********************************************************************************************************************
+	"""
 	input_genbank, output_proteome, logObject = inputs
 	try:
 		op_handle = open(output_proteome, 'w')
@@ -810,6 +1091,9 @@ def extractProteinsFromGenBank(inputs):
 		raise RuntimeError(traceback.format_exc())
 
 def determineAsofName(asof_index):
+	"""
+	Simple function to make integers into strings of equal length by appending 0s as prefices.
+	"""
 	asof_index_str = str(asof_index)
 	asof_name = None
 	if len(asof_index_str) == 1:
@@ -830,6 +1114,21 @@ def determineAsofName(asof_index):
 	return(asof_name)
 
 def runOrthoFinder2Full(prot_directory, orthofinder_outdir, run_msa, logObject, threads=1):
+	"""
+	Definition:
+	Wrapper function to run OrthoFinder2 for bacteria (involves some extra processing of hierearchical orthogroups).
+	********************************************************************************************************************
+	Parameters:
+	- prot_directory: The input directory of proteomes in FASTA format to provide to OrthoFinder2 as input.
+	- orthofinder_outdir: The workspace/output directory for OrthoFinder2 analysis.
+	- run_msa: Flag on whether to infer hierarchical orthogroups using MSA instead of DendroBlast.
+	- logObject: A python logging object.
+	- threads (optional): The number of threads. Default is 1. 
+	********************************************************************************************************************
+	Returns:
+	- result_file: The resulting orthogroup by sample carriage matrix.
+	********************************************************************************************************************
+	"""
 	result_file = orthofinder_outdir + 'Final_Orthogroups.tsv'
 	try:
 		orthofinder_cmd = ['orthofinder', '-f', prot_directory, '-t', str(threads)]
@@ -984,6 +1283,22 @@ def runOrthoFinder2Full(prot_directory, orthofinder_outdir, run_msa, logObject, 
 
 
 def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, run_msa, logObject, threads=1):
+	"""
+	Definition:
+	Wrapper function to run OrthoFinder2 for fungi.
+	********************************************************************************************************************
+	Parameters:
+	- prot_directory: The input directory of proteomes in FASTA format to provide to OrthoFinder2 as input.
+	- orthofinder_outdir: The workspace/output directory for OrthoFinder2 analysis.
+	- run_msa: Flag on whether to infer hierarchical orthogroups using MSA instead of DendroBlast.
+	- logObject: A python logging object.
+	- threads (optional): The number of threads. Default is 1.
+	********************************************************************************************************************
+	Returns:
+	- result_file: The resulting orthogroup by sample carriage matrix.
+	********************************************************************************************************************
+	"""
+
 	result_file = orthofinder_outdir + 'Final_Orthogroups.tsv'
 	try:
 		orthofinder_cmd = ['orthofinder', '-f', prot_directory, '-t', str(threads)]
@@ -1060,6 +1375,21 @@ def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, run_msa, logOb
 
 
 def runOrthoFinder2(prot_directory, orthofinder_outdir, logObject, threads=1):
+	"""
+	Definition:
+	Wrapper function to run OrthoFinder2 up until the coarse orthogroups are determined (basically the end of 
+	OrthoFinder 1).
+	********************************************************************************************************************
+	Parameters:
+	- prot_directory: The input directory of proteomes in FASTA format to provide to OrthoFinder2 as input.
+	- orthofinder_outdir: The workspace/output directory for OrthoFinder2 analysis.
+	- logObject: A python logging object.
+	- threads (optional): The number of threads. Default is 1. 
+	********************************************************************************************************************
+	Returns:
+	- result_file: The resulting orthogroup by sample carriage matrix.
+	********************************************************************************************************************
+	"""
 	result_file = orthofinder_outdir + 'Final_Orthogroups.tsv'
 	try:
 		orthofinder_cmd = ['orthofinder', '-f', prot_directory, '-t', str(threads), '-og']
@@ -1090,6 +1420,23 @@ def runOrthoFinder2(prot_directory, orthofinder_outdir, logObject, threads=1):
 	return result_file
 
 def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, logObject, threads=1, panaroo_options='--clean-mode moderate --remove-invalid-genes'):
+	"""
+	Definition:
+	Wrapper function to run Panaroo.
+	********************************************************************************************************************
+	Parameters:
+	- detailed_BGC_listing_file: A detailed BGC listing file with positional/location information for each BGC.
+	- panaroo_input_dir: The directory with input GFF files (in Prokka format) to provide to Panaroo as input. 
+	- results_directory: The workspace/output directory for Panaroo analysis.
+	- logObject: A python logging object.
+	- threads (optional): . Default is 1. 
+	- panaroo_options (optional): Additional options for running Panaroo. Default is "--clean-mode moderate 
+	                              --remove-invalid-genes". 
+	********************************************************************************************************************
+	Returns:
+	- result_file: The resulting orthogroup by sample carriage matrix.
+	********************************************************************************************************************
+	"""
 	result_file = results_directory + 'Final_Orthogroups.tsv'
 	try:
 		sample_genomes = {}
@@ -1180,55 +1527,12 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 		sys.stderr.write(msg + '\n')
 		sys.stderr.write(traceback.format_exc() + '\n')
 		sys.exit(1)
-
 	return result_file
 
-def selectFinalResultsAndCleanUp(outdir, fin_outdir, logObject):
-
-	""" 
-	TODO: Refactor for lsaBGC-PAN
-	"""
-	try:
-		delete_set = set(['BLASTing_of_Ortholog_Groups', 'OrthoFinder2_Results', 'KOfam_Annotations',
-						  'Prodigal_Gene_Calling_Additional', 'Predicted_Proteomes_Initial',
-						  'Prodigal_Gene_Calling', 'Genomic_Genbanks_Initial'])
-		for fd in os.listdir(outdir):
-			if os.path.isfile(fd): continue
-			subdir = outdir + fd + '/'
-			if fd in delete_set:
-				os.system('rm -rf %s' % subdir)
-		if os.path.isdir(outdir + 'BGCs_Retagged_and_Updated'):
-			os.system('rm -rf %s' % outdir + 'BGCs_Retagged')
-		if os.path.isdir(outdir + 'lsaBGC_AutoExpansion_Results/'):
-			os.system('ln -s %s %s' % (
-			outdir + 'lsaBGC_AutoExpansion_Results/Updated_GCF_Listings/', fin_outdir + 'Expanded_GCF_Listings'))
-			os.system('ln -s %s %s' % (
-			outdir + 'lsaBGC_AutoExpansion_Results/Orthogroups.expanded.tsv', fin_outdir + 'Expanded_Orthogroups.tsv'))
-			os.system('ln -s %s %s' % (outdir + 'lsaBGC_AutoExpansion_Results/Sample_Annotation_Files.txt',
-									   fin_outdir + 'Expanded_Sample_Annotation_Files.txt'))
-			if os.path.isfile(outdir + 'Intermediate_Files/GToTree_output.tre'):
-				os.system('ln -s %s %s' % (outdir + 'Intermediate_Files/GToTree_output.tre', fin_outdir))
-			if os.path.isfile(outdir + 'Intermediate_Files/GToTree_Expected_Similarities.txt'):
-				os.system('ln -s %s %s' % (outdir + 'Intermediate_Files/GToTree_Expected_Similarities.txt', fin_outdir))
-			if os.path.isfile(outdir + 'Intermediate_Files/Samples_in_GToTree_Tree.txt'):
-				os.system('ln -s %s %s' % (outdir + 'Intermediate_Files/Samples_in_GToTree_Tree.txt', fin_outdir))
-		else:
-			os.system('ln -s %s %s' % (outdir + 'Intermediate_Files/*', fin_outdir))
-			if os.path.isdir(outdir + 'BiG_SCAPE_Results_Reformatted/'):
-				os.system('ln -s %s %s' % (
-				outdir + 'BiG_SCAPE_Results_Reformatted/GCF_Listings/', fin_outdir + 'GCF_Listings'))
-				os.system('ln -s %s %s' % (
-				outdir + 'BiG_SCAPE_Results_Reformatted/GCF_Details.txt', fin_outdir + 'GCF_Details.txt'))
-			elif os.path.isdir(outdir + 'lsaBGC_Cluster_Results/'):
-				os.system(
-					'ln -s %s %s' % (outdir + 'lsaBGC_Cluster_Results/GCF_Listings/', fin_outdir + 'GCF_Listings'))
-				os.system('ln -s %s %s' % (
-				outdir + 'lsaBGC_Cluster_Results/GCF_Details_Expanded_Singletons.txt', fin_outdir + 'GCF_Details.txt'))
-	except Exception as e:
-		raise RuntimeError(traceback.format_exc())
-
-
 def setupReadyDirectory(directories):
+	"""
+	Simple function to (re-)create directories provided as a list.  
+	"""
 	try:
 		assert (type(directories) is list)
 		for d in directories:
@@ -1304,18 +1608,17 @@ def is_genbank(gbk):
 		return True
 	except:
 		return False
-
-def parseVersionFromSetupPy():
-	"""
-	Parses version from setup.py program.
-	"""
-	return(str(version))
-
+	
 def createLoggerObject(log_file):
 	"""
+	Description:
 	Function which creates logger object.
-	:param log_file: path to log file.
-	:return: logging logger object.
+	********************************************************************************************************************	
+	Parameters:
+	- log_file: path to log file.
+	********************************************************************************************************************
+	Returns:
+	- logObject: logging logger object.
 	"""
 	logger = logging.getLogger('task_logger')
 	logger.setLevel(logging.DEBUG)
@@ -1330,8 +1633,12 @@ def createLoggerObject(log_file):
 
 def closeLoggerObject(logObject):
 	"""
-	Function which closes/terminates loggerObject.
-	:param logObject: logging logger object to close
+	Description:
+	Void function which closes/terminates a logger object.
+	********************************************************************************************************************	
+	Parameters:
+	- logObject: A python logger object to close.
+	********************************************************************************************************************	
 	"""
 	handlers = logObject.handlers[:]
 	for handler in handlers:
@@ -1367,8 +1674,21 @@ def logParametersToObject(logObject, parameter_names, parameter_values):
 		pn = parameter_names[i]
 		logObject.info(pn + ': ' + str(pv))
 
-
 def determineSeqSimProteinAlignment(protein_alignment_file, use_only_core=True):
+	"""
+	Definition:	
+	Function to determine sequence similarity between pairs of proteins in a protein multiple sequence alignment.
+	Used in popstrat.
+	********************************************************************************************************************
+	Parameters:
+	- protein_alignment_file: The input protein multiple sequence alignment in FASTA format.
+	- use_only_core (optional): Use only core sites shared by both sequences (neither sequence has an ambiguous allele). 
+	                            Default is True.
+	********************************************************************************************************************
+	Returns:
+	- pair_seq_matching: A dictionary showing the sequence similarity between proteins in the alignment.
+	********************************************************************************************************************
+	"""
 	protein_sequences = {}
 	with open(protein_alignment_file) as ocaf:
 		for rec in SeqIO.parse(ocaf, 'fasta'):
@@ -1401,6 +1721,12 @@ def determineSeqSimProteinAlignment(protein_alignment_file, use_only_core=True):
 				pair_seq_matching[s2][s1] = general_matching_percentage
 
 	return pair_seq_matching
+
+def parseVersion():
+	"""
+	Returns suite version. 
+	"""
+	return(str(version))
 
 def castToNumeric(x):
 	"""
@@ -1466,6 +1792,32 @@ def loadTableInPandaDataFrame(input_file, numeric_columns):
 def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_results_dir, zol_high_qual_flag,
 							     mibig_dir, recon_result_file, recon_og_result_file, recon_pop_color_file,
 								 sociate_result_file, final_spreadsheet_xlsx, scratch_dir, logObject):
+	"""
+	Definition:
+	Void, major function to create the final consolidated spreadsheet that is the major result of lsaBGC-Pan.
+	********************************************************************************************************************
+	Parameters:
+	- detailed_BGC_listing_with_pop_and_GCF_map_file: The detailed BGC listing file produced in lsaBGC-Pan with much of 
+	                                                  the information for sample mapping, GCF mapping, and context of 
+													  each BGC.
+	- zol_results_dir:
+	- zol_high_qual_flag: A flag for whether zol analyses were run with a more comprehensive/high-quality preset of 
+	                      options
+	- mibig_dir: The directory with results from lsaBGC-MIBiGMapper for all GCFs.
+	- recon_result_file: The major result file from lsaBGC-Recon showing a table showing how BGC-associated orthogroups
+	                     are distributed in different populations and GCF contexts.
+	- recon_og_result_file: The secondary major result file from lsaBGC-Recon which shows a matrix of orthogroup 
+	                        carriage across samples.
+	- recon_pop_color_file: The population coloring determined in lsaBGG-Recon to eventually color the spreadsheet 
+	                        using. Currently is not used!
+	- sociate_result_file: The major result file from lsaBGC-Sociate showing the results of finding associated/
+	                       disocciated orthogroups and GCFs with focal GCFs.
+	- final_spreadsheet_xlsx: The final consolidated spreadsheet path; to be made in the function.
+	- scratch_dir: A scratch space to write temporary/intermediate files.
+	- logObject: A python logging object.
+	********************************************************************************************************************
+	"""
+
 	try:
 		# generate Excel spreadsheet
 		writer = pd.ExcelWriter(final_spreadsheet_xlsx, engine='xlsxwriter')

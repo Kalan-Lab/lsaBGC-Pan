@@ -50,6 +50,11 @@ class GCF(Pan):
 		self.avoid_samples = set([])
 
 	def identifyKeyHomologGroups(self, all_primary=False):
+		"""
+		Function that is not used currently in lsaBGC-Pan - in the original lsaBGC - this function 
+		computed which orthogroups were core to a BGC, which were single-copy core and which were 
+		commonly found in BGC protocore regions. This is a little more tricky to integrate with zol.
+		"""
 		try:
 			initial_samples_with_at_least_one_gcf_hg = set([])
 			for hg in self.hg_genes:
@@ -96,7 +101,7 @@ class GCF(Pan):
 
 	def aggregateProteins(self, gcf_prots_file, draft_mode=False):
 		"""
-		function to aggregate protein sequences from BGC genbanks and output to a file in FASTA format.
+		Function to aggregate protein sequences from BGC genbanks and output to a file in FASTA format.
 		"""
 		try:
 			gpf_handle = open(gcf_prots_file, 'w')
@@ -118,11 +123,14 @@ class GCF(Pan):
 
 	def modifyPhylogenyForSamplesWithMultipleBGCs(self, input_phylogeny, result_phylogeny, prune_set=None):
 		"""
+		Definition:
 		Function which takes in an input phylogeny and produces a replicate resulting phylogeny with samples/leafs which
 		have multiple BGC instances for a GCF expanded.
-
-		:param input_phylogeny: input newick phylogeny file
-		:result result_phylogeny: resulting newick phylogeny file
+		********************************************************************************************************************
+		Parameters:
+		- input_phylogeny: The input newick phylogeny file.
+		- result_phylogeny: The resulting newick phylogeny file to create.
+		********************************************************************************************************************
 		"""
 		try:
 			number_of_added_leaves = 0
@@ -155,11 +163,13 @@ class GCF(Pan):
 
 	def assignColorsToHGs(self, gene_to_hg, bgc_genes, outdir):
 		"""
+		Description:
 		Simple function to associate each homolog group with a color for consistent coloring.
-
-		:param gene_to_hg: gene to HG relationship.
-		:param bgc_genes:  set of genes per HG.
-		:return: dictionary mapping each HG to a hex color value.
+		********************************************************************************************************************
+		Parameters:
+		- gene_to_hg: gene to HG relationship.
+		- bgc_genes:  set of genes per HG.
+		********************************************************************************************************************
 		"""
 
 		hg_bgc_counts = defaultdict(int)
@@ -190,10 +200,14 @@ class GCF(Pan):
 
 	def createItolBGCSeeTrack(self, result_track_file):
 		"""
+		Description:
 		Function to create a track file for visualizing BGC gene architecture across a phylogeny in the interactive tree
 		of life (iTol)
-
-		:param result_track_file: The path to the resulting iTol track file for BGC gene visualization.
+		********************************************************************************************************************
+		Parameters:
+		- self: GCF object
+		- result_track_file: The path to the resulting iTol track file for BGC gene visualization.
+		********************************************************************************************************************
 		"""
 		try:
 			track_handle = open(result_track_file, 'w')
@@ -286,14 +300,18 @@ class GCF(Pan):
 	def visualizeComprehenSeeIveGCFViaR(self, orthofinder_matrix_file, phylogeny_newick_file, heatmap_track_file,
 										detection_track_file, result_pdf_file, plot_rscript):
 		"""
+		Definition:
 		Function to create tracks for visualization of gene architecture of BGCs belonging to GCF and run Rscript bgSee.R
 		to produce automatic PDFs of plots. In addition, bgSee.R also produces a heatmap to more easily identify homolog
 		groups which are conserved across isolates found to feature GCF.
-
-		:param gggenes_track_file: Path to file with gggenes track information (will be created/written to by function, if it doesn't exist!)
-		:param heatmap_track_file: Path to file for heatmap visual component (will be created/written to by function, if it doesn't exist!)
-		:param phylogeny_file: Phylogeny to use for visualization.
-		:param result_pdf_file: Path to PDF file where plots from bgSee.R will be written to.
+		********************************************************************************************************************
+		Parameters:
+		- self: GCF object
+		- gggenes_track_file: Path to file with gggenes track information (will be created/written to by function, if it doesn't exist!)
+		- heatmap_track_file: Path to file for heatmap visual component (will be created/written to by function, if it doesn't exist!)
+		- phylogeny_file: Phylogeny to use for visualization.
+		- result_pdf_file: Path to PDF file where plots from bgSee.R will be written to.
+		********************************************************************************************************************
 		"""
 		try:
 			if os.path.isfile(heatmap_track_file) or os.path.isfile(detection_track_file):
@@ -422,14 +440,20 @@ class GCF(Pan):
 
 	def visualizeGCFViaR(self, gggenes_track_file, heatmap_track_file, phylogeny_file, result_pdf_file, plot_rscript):
 		"""
+		Definition:
 		Function to create tracks for visualization of gene architecture of BGCs belonging to GCF and run Rscript bgSee.R
 		to produce automatic PDFs of plots. In addition, bgSee.R also produces a heatmap to more easily identify homolog
 		groups which are conserved across isolates found to feature GCF.
-
-		:param gggenes_track_file: Path to file with gggenes track information (will be created/written to by function, if it doesn't exist!)
-		:param heatmap_track_file: Path to file for heatmap visual component (will be created/written to by function, if it doesn't exist!)
-		:param phylogeny_file: Phylogeny to use for visualization.
-		:param result_pdf_file: Path to PDF file where plots from bgSee.R will be written to.
+		********************************************************************************************************************
+		Parameters:
+		- self: GCF object.
+		- gggenes_track_file: Path to file with gggenes track information (will be created/written to by function, if it 
+		                      doesn't exist!)
+		- heatmap_track_file: Path to file for heatmap visual component (will be created/written to by function, if it 
+		                      doesn't exist!)-
+		- phylogeny_file: Phylogeny to use for visualization.
+		- result_pdf_file: Path to PDF file where plots from bgSee.R will be written to.
+		********************************************************************************************************************
 		"""
 		try:
 			if os.path.isfile(gggenes_track_file) or os.path.isfile(heatmap_track_file):
@@ -599,18 +623,22 @@ class GCF(Pan):
 
 	def constructCodonAlignments(self, outdir, threads=1, only_scc=False, list_alignments=False, filter_outliers=False, use_ms5=True):
 		"""
+		Definition:
 		Function to automate construction of codon alignments. This function first extracts protein and nucleotide sequnces
 		from BGC Genbanks, then creates protein alignments for each homolog group using MAFFT, and finally converts those
 		into codon alignments using PAL2NAL.
-
-		:param outdir: Path to output/workspace directory. Intermediate files (like extracted nucleotide and protein
-						 sequences, protein and codon alignments, will be writen to respective subdirectories underneath this
-						 one).
-		:param threads: Number of threads/threads to use when fake-parallelizing jobs using multiprocessing.
-		:param only_scc: Whether to construct codon alignments only for homolog groups which are found to be core and in
-						 single copy for samples with the GCF. Note, if working with draft genomes and the BGC is fragmented
-						 this should be able to still identify SCC homolog groups across the BGC instances belonging to the
-						 GCF.
+		********************************************************************************************************************
+		Parameters:
+		- self: GCF object.
+		- outdir: Path to output/workspace directory. Intermediate files (like extracted nucleotide and protein
+				  sequences, protein and codon alignments, will be writen to respective subdirectories underneath this
+				  one).
+		- threads: Number of threads/threads to use when fake-parallelizing jobs using multiprocessing.
+		- only_scc: Whether to construct codon alignments only for homolog groups which are found to be core and in
+					single copy for samples with the GCF. Note, if working with draft genomes and the BGC is fragmented
+					this should be able to still identify SCC homolog groups across the BGC instances belonging to the
+					GCF.
+		********************************************************************************************************************
 		"""
 
 		nucl_seq_dir = os.path.abspath(outdir) + '/Nucleotide_Sequences/'
@@ -695,11 +723,15 @@ class GCF(Pan):
 
 	def constructGCFPhylogeny(self, output_alignment, output_phylogeny, only_scc=False, ambiguious_position_cutoff=0.000001):
 		"""
+		Definition:
 		Function to create phylogeny based on codon alignments of SCC homolog groups for GCF.
-
-		:param output_alignment: Path to output file for concatenated SCC homolog group alignment.
-		:param output_phylogeny: Path to output file for approximate maximum-likelihood phylogeny produced by FastTree2 from
-									 concatenated SCC homolog group alignment.
+		********************************************************************************************************************
+		Parameters:
+		- self: GCF object.
+		- output_alignment: Path to output file for concatenated SCC homolog group alignment.
+		- output_phylogeny: Path to output file for approximate maximum-likelihood phylogeny produced by FastTree2 from
+							concatenated SCC homolog group alignment.
+		********************************************************************************************************************
 		"""
 		try:
 			if only_scc:
@@ -796,9 +828,13 @@ class GCF(Pan):
 
 def create_codon_msas(inputs):
 	"""
+	Definition:
 	Helper function which is to be called from the constructCodonAlignments() function to parallelize construction
 	of codon alignments for each homolog group of interest in the GCF.
-	:param inputs: list of inputs passed in by GCF.constructCodonAlignments().
+	********************************************************************************************************************
+	Parameters:
+	- inputs: list of inputs passed in by GCF.constructCodonAlignments().
+	********************************************************************************************************************
 	"""
 	hg, gene_sequences, nucl_seq_dir, prot_seq_dir, prot_alg_dir, codo_alg_dir, threads, use_ms5, logObject = inputs
 

@@ -163,7 +163,7 @@ class BGC:
 		self.cluster_information = bgc_info
 
 	def parseAntiSMASH(self, comprehensive_parsing=True, flank_size=2000):
-		""" Functoin to parse BGC Genbank produced by antiSMASH """
+		""" Function to parse BGC Genbank produced by antiSMASH """
 		bgc_info = []
 		domains = []
 		core_positions = set([])
@@ -326,68 +326,3 @@ class BGC:
 			self.parseGECCO(comprehensive_parsing=comprehensive_parsing, flank_size=flank_size)
 		else:
 			raise RuntimeError("Unable to parse file because BGC prediction method is not an accepted option!")
-
-	def refineGenbank(self, refined_genbank_file, first_bg, second_bg):
-		"""
-		Function to prune and update coordinates of BGC Genbank - main functoin of lsaBGC-Refiner
-		"""
-		try:
-			rgf_handle = open(refined_genbank_file, 'w')
-			start_coord = min([self.gene_information[first_bg]['start'], self.gene_information[first_bg]['end'], self.gene_information[second_bg]['start'], self.gene_information[second_bg]['end']])
-			end_coord = max([self.gene_information[first_bg]['start'], self.gene_information[first_bg]['end'], self.gene_information[second_bg]['start'], self.gene_information[second_bg]['end']])
-			pruned_coords = set(range(start_coord, end_coord+1))
-			with open(self.bgc_genbank) as ogbk:
-				recs = [x for x in SeqIO.parse(ogbk, 'genbank')]
-				try:
-					assert(len(recs) == 1)
-				except Exception as e:
-					raise RuntimeError(traceback.format_exc())
-				for rec in recs:
-					original_seq = str(rec.seq)
-					filtered_seq = ""
-					if end_coord == len(original_seq):
-						filtered_seq = original_seq[start_coord-1:]
-					else:
-						filtered_seq = original_seq[start_coord-1:end_coord]
-
-					new_seq_object = Seq(filtered_seq)
-
-					updated_rec = copy.deepcopy(rec)
-					updated_rec.seq = new_seq_object
-
-					updated_features = []
-					for feature in rec.features:
-						all_coords, start, end, direction, is_multi_part = util.parseCDSCoord(str(feature.location))
-
-						feature_coords = set(range(start, end+1))
-						if len(feature_coords.intersection(pruned_coords)) > 0:
-							fls = []
-							for sc, ec, dc in all_coords:
-								updated_start = sc - start_coord + 1
-								updated_end = ec - start_coord + 1
-								if ec > end_coord:
-									if feature.type == 'CDS':
-										continue
-									else:
-										updated_end = end_coord - start_coord + 1  # ; flag1 = True
-								if sc < start_coord:
-									if feature.type == 'CDS':
-										continue
-									else:
-										updated_start = 1  # ; flag2 = True
-
-								strand = 1
-								if dc == '-':
-									strand = -1
-								fls.append(FeatureLocation(updated_start - 1, updated_end, strand=strand))
-							if len(fls) > 0:
-								updated_location = fls[0]
-								if len(fls) > 1:
-									updated_location = sum(fls)
-								feature.location = updated_location
-								updated_features.append(feature)
-					updated_rec.features = updated_features
-					SeqIO.write(updated_rec, rgf_handle, 'genbank')
-			rgf_handle.close()
-		except Exception as e:
-			raise RuntimeError(traceback.format_exc())

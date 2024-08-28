@@ -64,9 +64,17 @@ class Pan:
 
 	def readInBGCGenbanks(self, comprehensive_parsing=True, prune_set=None, edge_dist_cutoff=5000):
 		"""
+		Definition:
 		Function to parse file listing location of BGC Genbanks.
-
-		:param comprehensive_parsing (optional): flag specifying whether to perform comprehensive extraction of information from Genbanks. default is True.
+		********************************************************************************************************************
+		Parameters:
+		- self: A Pan, GCF, or BGC object.
+		- comprehensive_parsing (optional): flag specifying whether to perform comprehensive extraction of information from 
+		                                    Genbanks. default is True.
+		- prune_set (optional): set of samples to prune out and disregard BGCs from. default is None. 
+		- edge_dist_cutoff (optional): the distance from scaffold/contig edge for a BGC to be regarded as incomplete. default 
+		                               is 5000
+		********************************************************************************************************************
 		"""
 		sample_index = defaultdict(int)
 		with open(self.bgc_genbanks_listing) as obsf:
@@ -128,14 +136,18 @@ class Pan:
 
 	def inputHomologyInformation(self, gene_to_hg, hg_genes, hg_median_copy_count, hg_prop_multi_copy):
 		"""
+		Definition:
 		Simple function to store OrthoFinder homology information (parsed inititally in lsaBGC.utils)
-
-		:param gene_to_hg: dictionary mapping gene locus tags to homolog group identifiers
-		:param hg_genes: dictionary of sets with keys corresponding to homolog groups and values corresponding to set
-						 of gene locus tags belonging to that homolog group.
-		:param hg_median_copy_count: dictionary for the median copy count of each homolog group
-		:param hg_prop_multi_copy: dictionary for the proportion of samples with homolog group which have multipmle
-								   genes assigned to homolog group (paralogs).
+		********************************************************************************************************************
+		Parameters:
+		- self: A Pan, GCF, or BGC object.
+		- gene_to_hg: dictionary mapping gene locus tags to homolog group identifiers
+		- hg_genes: dictionary of sets with keys corresponding to homolog groups and values corresponding to set
+					of gene locus tags belonging to that homolog group.
+		- hg_median_copy_count: dictionary for the median copy count of each homolog group
+		- hg_prop_multi_copy: dictionary for the proportion of samples with homolog group which have multipmle
+							  genes assigned to homolog group (paralogs).
+		********************************************************************************************************************
 		"""
 		try:
 			self.gene_to_hg = dict(gene_to_hg)
@@ -159,10 +171,14 @@ class Pan:
 
 	def openStatsFile(self, outdir, run_parameter_tests=False):
 		"""
+		Definition:
 		Simple function to initialize final report file with statistics on GCF clustering - main output from lsaBGC-Cluster.
-
-		:param outdir: path to workspace directory
-		:param run_parameter_tests: whether lsaBGC-Cluster is being run in "run_parameter_tests mode".
+		********************************************************************************************************************
+		Parameters:
+		- self: A Pan, GCF or BGC object.
+		- outdir: path to workspace directory
+		- run_parameter_tests: whether lsaBGC-Cluster is being run in "run_parameter_tests mode".
+		********************************************************************************************************************
 		"""
 		try:
 			final_stats_file = outdir + 'GCF_Details.txt'
@@ -282,13 +298,17 @@ class Pan:
 
 	def runMCLAndReportGCFs(self, mip, jcp, sccp, ccp, outdir, run_parameter_tests=False, threads=1):
 		"""
+		Description:
 		Function to run MCL and report the GCFs (gene-cluster families) of homologous BGCs identified.
-
-		:param mip: MCL inflation parameter.
-		:param jcp: Jaccard similarity threshold for homology between two BGCs to be considered.
-		:param outdir: path to workspace directory.
-		:param run_parameter_tests: True
-		:param threads: number of threads/threads to use for MCL.
+		********************************************************************************************************************
+		Parameters:
+		- self: A Pan, GCF or BGC object.
+		- mip: MCL inflation parameter.
+		- jcp: Jaccard similarity threshold for homology between two BGCs to be considered.
+		- outdir: path to workspace directory.
+		- run_parameter_tests: True
+		- threads: number of threads/threads to use for MCL.
+		********************************************************************************************************************
 		"""
 		pair_relations_filt_txt_file = outdir + 'bgc_pair_relationships.txt' 
 		try:
@@ -514,11 +534,15 @@ class Pan:
 
 	def plotResultsFromUsingDifferentParameters(self, outdir):
 		"""
+		Description:
 		Function to create an 8x11 in PDF with figures aimed to give the user an idea on how different values of the
 		MCL inflation parameter and the Jaccard similarity cutoff might impact clustering to help them choose the best
 		parameter values.
-
-		:param outdir: path to workspace directory.
+		********************************************************************************************************************
+		Parameters:
+		- self: A Pan, GCF or BGC object.
+		- outdir: path to workspace directory.
+		********************************************************************************************************************
 		"""
 		try:
 			plot_input_dir = outdir + 'plotting_input/'
@@ -762,6 +786,21 @@ class Pan:
 			raise RuntimeError(traceback.format_exc())
 
 	def createParamInfluencePlot(self, workspace, plot_input_1_file, plot_annot_file, plot_input_2_file, plot_overview_file, plot_input_3_file, plot_pdf_file):
+		"""
+		Description:
+		Function to create the parameter impact assessment PDF report for lsaBGC-Cluster.
+		********************************************************************************************************************
+		Parameters:
+		- self: A Pan, GCF or BGC object.
+		- workspace: The output/workspace where to generate R scripts and other intermediate files.
+		- plot_input_1_file: The input table  
+		- plot_annot_file: The input table used to create the heatmap visuals on the second page of the PDF report.
+		- plot_input_2_file: The input table used to assess homogeneity in product/BGC-types per GCF clustering.
+		- plot_overview_file: The input table with overview information on clustering using a variety of parameters.
+		- plot_input_3_file: The input table with information on copy-count of GCFs per sample.
+		- plot_pdf_file: The resulting path to the report PDF file.
+		********************************************************************************************************************
+		"""
 		rscript_file = workspace + 'params_impact_rscript.R' 
 		rfh = open(rscript_file, 'w')
 
@@ -878,30 +917,3 @@ class Pan:
 				self.logObject.error('Had an issue running: %s' % ' '.join(rscript_plot_cmd))
 				self.logObject.error(traceback.format_exc())
 			raise RuntimeError('Had an issue running: %s' % ' '.join(rscript_plot_cmd))
-	
-
-	def readInPopulationsSpecification(self, pop_specs_file, prune_set=None):
-		"""
-		Read in population specifications per sample and assign population to each BGC.
-
-		:param pop_specs_file: path to file which has tab separated sample (1st column) and corresponding population (2nd column)
-		"""
-		try:
-			self.bgc_population = defaultdict(lambda: "NA")
-			self.sample_population = defaultdict(lambda: "NA")
-			with open(pop_specs_file) as opsf:
-				for i, line in enumerate(opsf):
-					if i == 0 and line.startswith('name'): continue
-					line = line.strip()
-					sample, population = line.split('\t')
-					if prune_set != None and not sample in prune_set: continue
-					self.sample_population[sample] = population
-					for bgc in self.sample_bgcs[sample]:
-						self.bgc_population[bgc] = population
-			self.logObject.info("Successfully parsed population specifications file. There are %d populations." % len(population))
-		except Exception as e:
-			if self.logObject:
-				self.logObject.error("Issue in parsing population specifications per sample and associating with each BGC.")
-				self.logObject.error(traceback.format_exc())
-			raise RuntimeError(traceback.format_exc())
-

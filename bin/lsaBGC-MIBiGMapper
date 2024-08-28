@@ -125,7 +125,7 @@ def mapToMIBiG():
 	# create logging object
 	log_file = outdir + 'Progress.log'
 	logObject = util.createLoggerObject(log_file)
-	version_string = util.parseVersionFromSetupPy()
+	version_string = util.parseVersion()
 	logObject.info('Running lsaBGC version %s' % version_string)
 
 

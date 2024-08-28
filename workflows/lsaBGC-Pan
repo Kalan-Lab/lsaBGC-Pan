@@ -167,7 +167,7 @@ def create_parser():
 	return args
 
 def lsaBGC():
-	version_string = util.parseVersionFromSetupPy()
+	version_string = util.parseVersion()
 	if '-v' in sys.argv or '--version' in sys.argv:
 		logo = """
    __              ___   _____  _____
