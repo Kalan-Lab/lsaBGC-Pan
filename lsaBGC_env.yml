@@ -7,8 +7,8 @@ dependencies:
   - r-base
   - setuptools
   - pip
-  - zol>=1.4.12
-  - muscle>=5.0
+  - zol>=1.5.12
+  - muscle=5.1
   - orthofinder=2.5.5
   - panaroo
   - pyseer>=1.3

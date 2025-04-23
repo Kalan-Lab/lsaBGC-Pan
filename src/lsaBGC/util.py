@@ -1850,13 +1850,15 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 							'OG Consensus Direction', 'Tajima\'s D', 'Proportion of Filtered Codon Alignment is Segregating Sites', 
 							'Entropy', 'Upstream Region Entropy', 'Median Beta-RD-gc', 'Max Beta-RD-gc', 
 							'Proportion of sites which are highly ambiguous in codon alignment', 
-							'Proportion of sites which are highly ambiguous in trimmed codon alignment', 'Median GC', 'Median GC Skew']
-
-		if zol_high_qual_flag:
-			zol_sheet_header += ['GARD Partitions Based on Recombination Breakpoints',
-			           'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
-				       'Average delta(Beta, Alpha) by FUBAR across sites',
-				       'Proportion of Sites Under Selection which are Positive'] 
+							'Proportion of sites which are highly ambiguous in trimmed codon alignment', 'Median GC', 'Median GC Skew',
+							'BGC score (GECCO weights)', 'Viral score (V-Score)']
+		
+		# TODO consider bringing back the following - will affect column referencing for coloring below:
+		#if zol_high_qual_flag:
+		#	zol_sheet_header += ['GARD Partitions Based on Recombination Breakpoints',
+		#	           'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
+		#		       'Average delta(Beta, Alpha) by FUBAR across sites',
+		#		       'Proportion of Sites Under Selection which are Positive'] 
 					
 		zol_sheet_header += ['KO Annotation (E-value)', 'PGAP Annotation (E-value)', 'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)',
 							'IS Finder (E-value)', 'MIBiG Annotation (E-value)', 'VOG Annotation (E-value)', 'VFDB Annotation (E-value)', 
@@ -1892,9 +1894,9 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 					if i == 0: continue
 					line = line.strip()
 					ls = line.split('\t')
-					row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:16] + ls[17:]
+					row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:18] + ls[19:]
 					if zol_high_qual_flag:
-						row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:20] + ls[21:]
+						row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:22] + ls[23:]
 					zctf_handle.write('\t'.join(row) + '\n')
 					num_rows += 1
 		zctf_handle.close()
@@ -1904,7 +1906,8 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			           			  'Number of Sites Identified as Under Positive or Negative Selection by FUBAR', 'Average delta(Beta, Alpha) by FUBAR across sites',
 				     		      'Proportion of Sites Under Selection which are Positive', 'Proportion of Filtered Codon Alignment is Segregating Sites',
 								  'Entropy', 'Upstream Region Entropy', 'Median Beta-RD-gc', 'Max Beta-RD-gc', 'Proportion of sites which are highly ambiguous in codon alignment', 
-								  'Proportion of sites which are highly ambiguous in trimmed codon alignment', 'Median GC', 'Median GC Skew'])
+								  'Proportion of sites which are highly ambiguous in trimmed codon alignment', 'Median GC', 'Median GC Skew', 
+								  'BGC score (GECCO weights)', 'Viral score (V-Score)'])
 		
 		zr_data = loadTableInPandaDataFrame(zol_combined_tsv_file, zr_numeric_columns)
 		zr_data.to_excel(writer, sheet_name='zol Results', index=False, na_rep="NA")
@@ -1970,11 +1973,19 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 										{'type': '2_color_scale', 'min_color': "#c7afb4", 'min_type': 'num', 'max_type': 'num',
 										'max_color': "#965663", "min_value": -2.0, "max_value": 2.0})
 
+		# BGC score 
+		zr_sheet.conditional_format('S2:S' + str(num_rows), {'type': '2_color_scale', 'min_color': "#f5aca4", 'min_type': 'num', 'max_type': 'num',
+									'max_color': "#c75246", "min_value": -7.0, "max_value": 13.0})
+		
+		# V-Score
+		zr_sheet.conditional_format('T2:T' + str(num_rows), {'type': '2_color_scale', 'min_color': "#dfccff", 'min_type': 'num', 'max_type': 'num',
+									'max_color': "#715a96", "min_value": 0.0, "max_value": 10.0})
+
 
 		# create MIBiG mapping spreadsheet
-		mibig_json_tar_url = 'https://dl.secondarymetabolites.org/mibig/mibig_json_3.1.tar.gz'
-		mibig_json_tar_dir = scratch_dir + 'mibig_json_3.1/'
-		mibig_json_tar_file = scratch_dir + 'mibig_json_3.1.tar.gz'
+		mibig_json_tar_url = 'https://dl.secondarymetabolites.org/mibig/mibig_json_4.0.tar.gz'
+		mibig_json_tar_dir = scratch_dir + 'mibig_json_4.0/'
+		mibig_json_tar_file = scratch_dir + 'mibig_json_4.0.tar.gz'
 
 		if not os.path.isdir(mibig_json_tar_dir):
 			if os.path.isfile(mibig_json_tar_file):
@@ -2007,7 +2018,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 				json_bgc_file = mibig_json_tar_dir + f
 				with open(json_bgc_file) as json_data:
 					data = json.load(json_data)
-					for comp in data['cluster']['compounds']:
+					for comp in data['compounds']:
 						for key in comp:
 							if key == 'compound':
 								mibig_bgc_compounds[bgc].append(comp[key])
