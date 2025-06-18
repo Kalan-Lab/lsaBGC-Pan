@@ -7,14 +7,7 @@ from Bio.SeqFeature import SeqFeature, FeatureLocation
 from operator import itemgetter
 import traceback
 import copy
-import _pickle as cPickle
 from lsaBGC import util
-
-gecco_pickle_weights_file = None
-try:
-	gecco_pickle_weights_file = os.environ["GECCO_DOMAIN_WEIGHTS_PKL_FILE"]
-except:
-	pass 
 
 class BGC:
 	def __init__(self, bgc_genbank, bgc_id, is_expansion_bgc, prediction_method='ANTISMASH'):
@@ -27,11 +20,7 @@ class BGC:
 
 	def parseGECCO(self, comprehensive_parsing=True, flank_size=2000):
 		""" Function to parse BGC Genbank produced by GECCO BGC."""
-		domains = []
-		domain_weights = {}
-
-		gecco_pfam_weights_pickle_handle = open(gecco_pickle_weights_file, "rb")
-		gecco_pfam_weights = cPickle.load(gecco_pfam_weights_pickle_handle)
+		
 		rec = SeqIO.read(self.bgc_genbank, 'genbank')
 		full_sequence = str(rec.seq)
 		for feature in rec.features:
@@ -40,7 +29,6 @@ class BGC:
 				end = feature.location.end
 				aSDomain = "NA"
 				description = "NA"
-				dom_weight = -7
 				try:
 					aSDomain = feature.qualifiers['standard_name'][0]
 				except:
@@ -49,11 +37,7 @@ class BGC:
 					description = feature.qualifiers['function'][0]
 				except:
 					pass
-				try:
-					dom_weight = gecco_pfam_weights[aSDomain]
-				except:
-					pass
-				domain_weights[aSDomain + '|' + str(start+1) + '|' + str(end)] = dom_weight
+
 				domains.append({'start': start + 1, 'end': end, 'type': feature.type, 'aSDomain': aSDomain, 'description': description, 'is_multi_part': False})
 
 		product = 'NA'
@@ -65,13 +49,6 @@ class BGC:
 			except:
 				pass
 		bgc_info = [{'prediction_method': self.prediction_method, 'detection_rule': 'NA', 'product': product, 'contig_edge': 'NA', 'full_sequence': full_sequence}]
-
-		# determine top 10% of domains with highest GECCO CRF weights (as recommended by Martin Larralde)
-		num_total_domains = len(domain_weights)
-		core_domains = set([])
-		for i, d in enumerate(sorted(domain_weights.items(), key=itemgetter(1), reverse=True)):
-			if i <= num_total_domains*0.1:
-				core_domains.add(d[0])
 
 		# sys.stderr.write('Processing %s\n' % self.bgc_genbank)
 		genes = {}
@@ -93,15 +70,11 @@ class BGC:
 				grange = set(range(start, end + 1))
 
 				gene_domains = []
-				core_overlap = False
+				core_overlap = "NA"
 				for d in domains:
 					drange = set(range(d['start'], d['end'] + 1))
 					if len(drange.intersection(grange)) > 0:
 						gene_domains.append(d)
-						if (d['aSDomain'] + '|' + str(d['start']) + '|' + str(d['end'])) in core_domains:
-							core_overlap = True
-							core_genes.add(lt)
-
 				gene_order[lt] = start
 
 				prot_seq, nucl_seq, nucl_seq_with_flanks, relative_start, relative_end = [None] * 5
@@ -144,20 +117,6 @@ class BGC:
 							 'core_overlap': core_overlap, 'relative_start': relative_start,
 							 'relative_end': relative_end, 'is_expansion_bgc': self.is_expansion_bgc,
 							 'is_multi_part': False}
-
-		number_of_core_gene_groups = 0
-		tmp = []
-		for lt in sorted(gene_order.items(), key=itemgetter(1), reverse=True):
-			if lt[0] in core_genes:
-				tmp.append(lt[0])
-			elif len(tmp) > 0:
-				number_of_core_gene_groups += 1
-				tmp = []
-		if len(tmp) > 0:
-			number_of_core_gene_groups += 1
-
-		for i, pc in enumerate(bgc_info):
-			bgc_info[i]['count_core_gene_groups'] = number_of_core_gene_groups
 
 		self.gene_information = genes
 		self.cluster_information = bgc_info
