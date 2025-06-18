@@ -23,6 +23,7 @@ class BGC:
 		
 		rec = SeqIO.read(self.bgc_genbank, 'genbank')
 		full_sequence = str(rec.seq)
+		domains = []
 		for feature in rec.features:
 			if feature.type == 'misc_feature':
 				start = feature.location.start + 1
