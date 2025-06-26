@@ -322,7 +322,7 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 	
 		zp = zol_parameters
 		if zol_high_quality_preset:
-			zp = '-qa -s -sg'
+			zp = '-qa -s -b'
 
 		for gcf in gcf_sample_bgcs:
 			gcf_bgcs_to_input = []
