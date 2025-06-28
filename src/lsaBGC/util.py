@@ -15,11 +15,15 @@ import numpy as np
 import gzip
 import warnings
 warnings.simplefilter('ignore')
-import pkg_resources  # part of setuptools
+import importlib.metadata
 import pandas as pd 
 
-version = pkg_resources.require("lsaBGC-Pan")[0].version
-
+try:
+	package_name = "lsaBGC-Pan"
+	package_version = str(importlib.metadata.version(package_name))
+except importlib.metadata.PackageNotFoundError:
+	package_version = "NA"
+	
 valid_alleles = set(['A', 'C', 'G', 'T'])
 
 def reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject):
@@ -1726,7 +1730,7 @@ def parseVersion():
 	"""
 	Returns suite version. 
 	"""
-	return(str(version))
+	return(package_version)
 
 def castToNumeric(x):
 	"""
