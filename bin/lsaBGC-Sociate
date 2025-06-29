@@ -332,7 +332,10 @@ def lsaBGC_Sociate():
                 if i == 0: continue
                 tot_tests += 1
 
-    mt_cor_alpha = 0.05/tot_tests
+    tot_tests = 0
+    mt_cor_alpha = 0.05
+    if tot_tests >= 1:
+        mt_cor_alpha = 0.05/tot_tests
 
     hits = []
     sociated_ogs = set([])

@@ -15,11 +15,15 @@ import numpy as np
 import gzip
 import warnings
 warnings.simplefilter('ignore')
-import pkg_resources  # part of setuptools
+import importlib.metadata
 import pandas as pd 
 
-version = pkg_resources.require("lsaBGC-Pan")[0].version
-
+try:
+	package_name = "lsaBGC-Pan"
+	package_version = str(importlib.metadata.version(package_name))
+except importlib.metadata.PackageNotFoundError:
+	package_version = "NA"
+	
 valid_alleles = set(['A', 'C', 'G', 'T'])
 
 def reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject):
@@ -322,7 +326,7 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 	
 		zp = zol_parameters
 		if zol_high_quality_preset:
-			zp = '-qa -b -s'
+			zp = '-qa -s -b'
 
 		for gcf in gcf_sample_bgcs:
 			gcf_bgcs_to_input = []
@@ -1726,7 +1730,7 @@ def parseVersion():
 	"""
 	Returns suite version. 
 	"""
-	return(str(version))
+	return(package_version)
 
 def castToNumeric(x):
 	"""
@@ -1853,12 +1857,11 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 							'Proportion of sites which are highly ambiguous in trimmed codon alignment', 'Median GC', 'Median GC Skew',
 							'BGC score (GECCO weights)', 'Viral score (V-Score)']
 		
-		# TODO consider bringing back the following - will affect column referencing for coloring below:
-		#if zol_high_qual_flag:
-		#	zol_sheet_header += ['GARD Partitions Based on Recombination Breakpoints',
-		#	           'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
-		#		       'Average delta(Beta, Alpha) by FUBAR across sites',
-		#		       'Proportion of Sites Under Selection which are Positive'] 
+		if zol_high_qual_flag:
+			zol_sheet_header += ['GARD Partitions Based on Recombination Breakpoints',
+			           'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
+				       'Average delta(Beta, Alpha) by FUBAR across sites',
+				       'Proportion of Sites Under Selection which are Positive', 'P-value for gene-wide episodic selection by BUSTED'] 
 					
 		zol_sheet_header += ['KO Annotation (E-value)', 'PGAP Annotation (E-value)', 'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)',
 							'IS Finder (E-value)', 'MIBiG Annotation (E-value)', 'VOG Annotation (E-value)', 'VFDB Annotation (E-value)', 
@@ -1896,7 +1899,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 					ls = line.split('\t')
 					row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:18] + ls[19:]
 					if zol_high_qual_flag:
-						row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:22] + ls[23:]
+						row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:23] + ls[24:]
 					zctf_handle.write('\t'.join(row) + '\n')
 					num_rows += 1
 		zctf_handle.close()
