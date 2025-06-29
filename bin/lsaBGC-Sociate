@@ -333,6 +333,7 @@ def lsaBGC_Sociate():
                 tot_tests += 1
 
     tot_tests = 0
+    mt_cor_alpha = 0.05
     if tot_tests >= 1:
         mt_cor_alpha = 0.05/tot_tests
 
