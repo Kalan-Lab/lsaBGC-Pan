@@ -900,7 +900,7 @@ def addLocusTagsToGBKs(inputs):
 			with open(bgc_gbk) as ogbf:
 				for line in ogbf:
 					line = line.strip()
-					if line.startswith('Orig. start  ::'):
+					if line.startswith('Orig. start') and   '::' in line:
 						bgc_starts.append(int(line.split()[-1].replace('>', '').replace('<', '')))			
 			assert(len(bgc_starts) == 1)
 			bgc_start = bgc_starts[0]
@@ -994,7 +994,7 @@ def findAntiSMASHBGCInFullGenbank(inputs):
 		with open(bgc_gbk) as ogbf:
 			for line in ogbf:
 				line = line.strip()
-				if line.startswith('Orig. start'):
+				if line.startswith('Orig. start') and '::' in line:
 					bgc_starts.append(int(line.split()[-1].replace('>', '').replace('<', '')))			
 
 		bgc_scaffold = None
