@@ -1,7 +1,7 @@
 [project]
 name = "lsaBGC-Pan"
 authors = [{name="Rauf Salamzade", email="salamzader@gmail.com"}]
-version = "1.1.5"
+version = "1.1.6"
 readme = "README.md"
 description = "lsaBGC-Pan: a workflow/suite for pan-BGC-ome analyses."
 
@@ -10,18 +10,17 @@ requires = ['setuptools']
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-script-files=['scripts/processAndReformatUserProvidedGenbanks.py',
-               'scripts/genbankToProkkaGFF.py',
-               'scripts/popstrat',
-               'scripts/phylogenate',
-               'scripts/GSeeF',
-               'bin/lsaBGC-Cluster',
-               'bin/lsaBGC-See',
-               'bin/lsaBGC-ComprehenSeeIve',
-               'bin/lsaBGC-MIBiGMapper',
-               'bin/lsaBGC-Reconcile',
-               'bin/lsaBGC-Sociate',
-               'workflows/lsaBGC-Pan']
+script-files=['scripts/genbankToProkkaGFF.py',
+              'scripts/popstrat',
+              'scripts/phylogenate',
+              'scripts/GSeeF',
+              'bin/lsaBGC-Cluster',
+              'bin/lsaBGC-See',
+              'bin/lsaBGC-ComprehenSeeIve',
+              'bin/lsaBGC-MIBiGMapper',
+              'bin/lsaBGC-Reconcile',
+              'bin/lsaBGC-Sociate',
+              'workflows/lsaBGC-Pan']
 
 [tool.setuptools.packages.find]
 where = ["src"]

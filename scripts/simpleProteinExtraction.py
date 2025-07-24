@@ -87,7 +87,7 @@ def simpleProteinExtraction():
 			for p in protein_dict:
 				outf.write('>' + str(p) + '\n' + protein_dict[p] + '\n')
 			outf.close()
-	except:
+	except Exception as e:
 		raise RuntimeError('Issues processing Genbank and extraction proteins into output FASTA file.')
 
 if __name__ == '__main__':

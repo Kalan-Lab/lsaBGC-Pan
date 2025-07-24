@@ -93,7 +93,7 @@ def popstrat():
 			R = t.get_midpoint_outgroup()
 			t.set_outgroup(R)
 			t.write(format=1, outfile=rooted_species_tree_file)
-		except:
+		except Exception as e:
 			sys.stderr.write('Error: Issue midpoint rooting the species tree.')
 			sys.exit(1)
 	else:
@@ -199,7 +199,7 @@ def popstrat():
 
 	try:
 		shutil.copy2(poplist_dir + 'Sample_to_Population_' + str(identity_cutoff) + '.txt', outdir + 'Sample_to_Population.txt')
-	except:
+	except Exception as e:
 		msg = 'Issue copying over the selected identity cutoff results to the main output directory.'
 		sys.stderr.write(msg + '\n')
 		

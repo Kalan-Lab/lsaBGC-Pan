@@ -102,7 +102,7 @@ def GSeeF():
 
 	try:
 		assert(os.path.isfile(lsabgc_detailed_listing))
-	except:
+	except Exception as e:
 		msg = 'Issues with validating lsaBGC detailed listing file.'
 		sys.stderr.write(msg + '\n')
 		logObject.error(msg)
@@ -129,7 +129,7 @@ def GSeeF():
 				elif method.upper() == 'GECCO':
 					bgc_annotation = util.parseGECCOGBKForFunction(bgc_gbk, logObject)
 				gcf_sample_annotations[gcf_id][sample].add(bgc_annotation)
-	except:
+	except Exception as e:
 		msg = 'Difficulty processing input listing file.'
 		sys.stderr.write(msg + '\n')
 		logObject.error(msg)		
@@ -142,7 +142,7 @@ def GSeeF():
 		R = t.get_midpoint_outgroup()
 		t.set_outgroup(R)
 		t.write(format=1, outfile=rooted_species_tree_file)
-	except:
+	except Exception as e:
 		sys.stderr.write('Error: Issue midpoint rooting the species tree.')
 		sys.exit(1)
 
@@ -293,7 +293,7 @@ def runPlotting(workspace, phylo_file, heatmap_file, pdf_file, legend_pdf_file, 
 		
 		rscript_cmd = ['Rscript', gseef_script]
 		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[pdf_file, legend_pdf_file])
-	except:
+	except Exception as e:
 		msg = 'Issues running image creation (which is primarily based on the R library ggtree)'
 		sys.stderr.write(msg + '\n')
 		logObject.error(msg)

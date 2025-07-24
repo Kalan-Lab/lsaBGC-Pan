@@ -219,7 +219,7 @@ def phylogenate():
 	if high_qual_flag:
 		# take iqtree approach
 		tree_file = outdir + 'Species_Phylogeny_IQTREE_Phylogeny_mset-WAG-LG_B-1000.treefile'
-		iqtree_cmd = ['iqtree2', '-Q', trim_dir, '-pre', outdir + 'Species_Phylogeny_IQTREE_Phylogeny_mset-WAG-LG_B-1000', '-B', '1000', '-mset', 'WAG,LG', '-nt', str(threads)]
+		iqtree_cmd = ['iqtree', '-Q', trim_dir, '-pre', outdir + 'Species_Phylogeny_IQTREE_Phylogeny_mset-WAG-LG_B-1000', '-B', '1000', '-mset', 'WAG,LG', '-nt', str(threads)]
 		util.runCmdViaSubprocess(iqtree_cmd, check_files=[tree_file])
 	else:
 		tree_file = outdir + 'Species_Phylogeny_FastTree2.treefile'

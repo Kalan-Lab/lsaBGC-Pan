@@ -76,7 +76,7 @@ def reformatToProkkaGFF():
 
 	try:
 		assert(util.is_genbank(input_genbank_file))
-	except:
+	except Exception as e:
 		raise RuntimeError('Issue with input Genbank file from NCBI.')
 
 	"""
@@ -97,7 +97,11 @@ def reformatToProkkaGFF():
 					start_coord = min([int(x) for x in str(feature.location)[1:].split(']')[0].split(':')]) + 1
 					end_coord = max([int(x) for x in str(feature.location)[1:].split(']')[0].split(':')])
 					direction = str(feature.location).split('(')[1].split(')')[0]
-					locus_tag = feature.qualifiers.get('locus_tag')[0]
+					try:
+						locus_tag = feature.qualifiers.get('locus_tag')[0]
+					except Exception as e:
+						msg = f'Warning: no locus_tag for feature {feature.type} in GenBank file {input_genbank_file}. Skipping.'
+						sys.stderr.write(msg + '\n')
 					last_col = ';'.join(['ID=' + locus_tag, 'inference=ab initio prediction:p(y)rodigal', 'locus_tag=' + locus_tag, 'product=unannotated protein'])
 					outf.write('\t'.join([rec.id, 'p(y)rodigal', 'CDS', str(start_coord), str(end_coord), '.', direction, '0', last_col]) + '\n')
 
@@ -106,7 +110,7 @@ def reformatToProkkaGFF():
 			for rec in SeqIO.parse(oigf, 'genbank'):
 				outf.write('>' + rec.id + '\n' + str(rec.seq) + '\n')
 		outf.close()
-	except:
+	except Exception as e:
 		raise RuntimeError("Issue reformatting to a Prokka GFF file.")
 
 if __name__ == '__main__':

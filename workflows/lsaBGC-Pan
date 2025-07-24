@@ -49,13 +49,16 @@ from lsaBGC import util
 import concurrent.futures
 import warnings
 import shutil
+from tqdm import tqdm
+from rich_argparse import RawTextRichHelpFormatter
+from argparse import ArgumentParser
 
 warnings.filterwarnings('ignore')
 os.environ["OMP_NUM_THREADS"] = "4"
 
 def create_parser():
 	""" Parse arguments """
-	parser = argparse.ArgumentParser(description="""
+	parser = ArgumentParser(description="""
        __              ___   _____  _____
       / /  ___ ___ _  / _ ) / ___/ / ___/
      / /  (_-</ _ `/ / _  |/ (_ / / /__  
@@ -120,14 +123,14 @@ def create_parser():
         - Step 12: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate 
                    results [no checkpoint, always rerun].
     **********************************************************************************************************
-	""", formatter_class=argparse.RawTextHelpFormatter)
+	""", formatter_class = RawTextRichHelpFormatter)
 
 	parser.add_argument('-a', '--antismash-results-directory', help="A directory with subdirectories corresponding to antiSMASH results\nper sample/genome [Optional].", required=False, default=None)
 	parser.add_argument('-g', '--genomes', nargs='+', help="Paths to genomes or directories with genomes in FASTA format.\nWill run GECCO for BGC-predictions [Optional].", required=False, default=[])
 	parser.add_argument('-o', '--output-directory', help="Parent output/workspace directory.", required=True)
 
 	parser.add_argument('-f', '--fungal', action='store_true', help="Specify if input are from fungal genomes. Only possible\nif antiSMASH results are provided.", required=False, default=False)
-	parser.add_argument('-k', '--keep-locus-tags', action='store_true', help="Keep original locus tags in antiSMASH GenBank files.", required=False, default=False)
+	parser.add_argument('-k', '--keep-locus-tags', action='store_true', help="Attempt to keep original locus tags in antiSMASH GenBank\nfiles - if locus tag is missing for one or more CDS\nfeatures new ones will be generated for the sample (experimental).", required=False, default=False)
 	parser.add_argument('-rg', '--run-gecco', action='store_true', help="If antiSMASH results are provided also run GECCO for\nannotation of BGCs.", required=False, default=False)
 
 	parser.add_argument('-up', '--use-panaroo', action='store_true', help='Use Panaroo instead of OrthoFinder for orthology inference.\nRecommended if investigating a single bacterial species.', default=False, required=False)
@@ -296,7 +299,7 @@ def lsaBGC():
 				msg = 'fungal mode triggered but --run-gecco also specified, GECCO is not designed for fungi - so turning it off.'
 				sys.stderr.write(msg + '\n')
 				logObject.warning(msg)
-		except:
+		except Exception as e:
 			msg = 'fungal mode triggered but no antiSMASH results were provided. GECCO is not designed for fungi, so exiting ...'
 			sys.stderr.write(msg + '\n')
 			logObject.error(msg)
@@ -306,7 +309,7 @@ def lsaBGC():
 		axel_cmd = ['axel', 'https://github.com/Kalan-Lab/lsaBGC/raw/main/db/GECCO_PF_Weights.pkl', '-o', gw_pkl]
 		try:
 			util.runCmdViaSubprocess(axel_cmd, logObject=logObject, check_files=[gw_pkl])
-		except:
+		except Exception as e:
 			msg = 'Had issues downloading GECCO domain weights file!'
 			sys.stderr.write(msg + '\n')
 			sys.stderr.write(traceback.format_exc())
@@ -323,6 +326,10 @@ def lsaBGC():
 		msg = 'Running in Docker mode'
 		sys.stdout.write(msg + '\n')
 		logObject.info(msg)
+
+	log_dir = outdir + 'Logs/'
+	if not os.path.isdir(log_dir):
+		os.mkdir(log_dir)
 
 	check_dir = outdir + 'Checkpoint_Files/'
 	if not os.path.isdir(check_dir):
@@ -366,7 +373,8 @@ be ignored. Note, the name of the subdirectory will be regarded as the
 sample name. GenBank files must also end with the suffix '.gbk'. In
 addition, lsaBGC uses locus tags - which are automatically renamed 
 to ensure seamless computing - if retention of original locus tags
-is preferred, users can issue the --keep_locus_tags option.
+is preferred, users can issue the --keep-locus-tags option, but it
+is experimental and might cause issues.
 			"""
 			sys.stdout.write(msg_about_antismash_input + '\n')
 			logObject.info(msg_about_antismash_input)
@@ -422,7 +430,9 @@ is preferred, users can issue the --keep_locus_tags option.
 
 				try:
 					with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-						executor.map(util.checkCDSHaveLocusTags, lt_check_inputs)
+						futures = [executor.submit(util.checkCDSHaveLocusTags, arg) for arg in lt_check_inputs]
+						for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Checking CDS locus tags"):
+							future.result()
 				except Exception as e:
 					msg = 'Issues with assessing the validity and presence of locus tags in GenBank files.'
 					sys.stderr.write(msg + '\n')
@@ -437,6 +447,10 @@ is preferred, users can issue the --keep_locus_tags option.
 						for line in ocf:
 							line = line.strip()
 							gbk_type, sample, gbk, cds_count, all_lt_found = line.split('\t')
+							if all_lt_found.lower() == 'true':
+								all_lt_found = True
+							else:
+								all_lt_found = False
 							cds_count = int(cds_count)
 							if cds_count == 0:
 								if gbk_type == 'genome':
@@ -445,6 +459,10 @@ is preferred, users can issue the --keep_locus_tags option.
 								else:
 									sample_bgc_regions[sample].remove(gbk)
 							elif not all_lt_found or not keep_lt_flag:
+								if keep_lt_flag:
+									msg = 'Locus tag missing for one or more CDS features for sample %s - renaming locus tags for the entire sample.' % sample
+									sys.stderr.write(msg + '\n')
+									logObject.info(msg)
 								samples_without_lts.add(sample)
 
 				alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -452,16 +470,21 @@ is preferred, users can issue the --keep_locus_tags option.
 
 				recreate_gbks_inputs = []		
 				for i, sample in enumerate(samples_without_lts):
-					if len(sample_bgc_regions) == 0:
+					if len(sample_bgc_regions[sample]) == 0:
 						del sample_genomes[sample]
-						del sample_bgc_regions[sample]
+						try:
+							del sample_bgc_regions[sample]
+						except Exception as e:
+							pass
 						continue
 					lt = possible_locustags[i]
-					recreate_gbks_inputs.append([sample, lt, genbank_recreate_dir, sample_genomes[sample]] + sample_bgc_regions[sample] + [keep_lt_flag, logObject])
+					recreate_gbks_inputs.append([sample, lt, genbank_recreate_dir, sample_genomes[sample]] + sample_bgc_regions[sample] + [False, logObject])
 					
 				try:
 					with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-						executor.map(util.addLocusTagsToGBKs, recreate_gbks_inputs)
+						futures = [executor.submit(util.addLocusTagsToGBKs, arg) for arg in recreate_gbks_inputs]
+						for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Adding locus tags"):
+							future.result()
 				except Exception as e:
 					msg = 'Issues with recreating select GenBank files to make sure each CDS feature has locus tags.'
 					sys.stderr.write(msg + '\n')
@@ -474,7 +497,6 @@ is preferred, users can issue the --keep_locus_tags option.
 					sample_genomes = {}
 					sample_bgc_regions = defaultdict(list)
 
-				sample_count = 0 
 				for sample in os.listdir(genbank_recreate_dir):
 					subdir = genbank_recreate_dir + sample + '/'
 					if not os.path.isdir(subdir): continue
@@ -489,7 +511,6 @@ is preferred, users can issue the --keep_locus_tags option.
 						else:
 							genome_gbks.append(gbk_file)
 					if len(genome_gbks) == 1 and len(region_gbks) >= 1:
-						sample_count += 1
 						sample_genomes[sample] = genome_gbks[0]
 						sample_bgc_regions[sample] = region_gbks
 					else:
@@ -497,6 +518,8 @@ is preferred, users can issue the --keep_locus_tags option.
 						sys.stderr.write(msg + '\n')
 						logObject.warning(msg)
 
+				sample_count = len(sample_genomes)
+				
 				if sample_count < 4 or sample_count > 200:
 					msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Only found %d genomes.' % sample_count
 					if sample_count > 200:
@@ -509,13 +532,17 @@ is preferred, users can issue the --keep_locus_tags option.
 				antismash_location_data = []
 				for sample in sample_genomes:
 					genome_gbk = sample_genomes[sample]
+					sample_bgc_info_tuples = []
 					for bgc_gbk in sample_bgc_regions[sample]:
 						outf = scaff_inf_dir + sample + '_antismash_bgc_region_' + bgc_gbk.split('/')[-1]
-						scaff_inf_inputs.append([genome_gbk, bgc_gbk, outf])
+						sample_bgc_info_tuples.append(tuple([bgc_gbk, outf]))
 						antismash_location_data.append([sample, genome_gbk, bgc_gbk, outf])
+					scaff_inf_inputs.append([sample, genome_gbk, sample_bgc_info_tuples])
 				try:
 					with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-						executor.map(util.findAntiSMASHBGCInFullGenbank, scaff_inf_inputs)
+						futures = [executor.submit(util.findAntiSMASHBGCInFullGenbank, arg) for arg in scaff_inf_inputs]
+						for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Finding antiSMASH BGC locations"):
+							future.result()
 				except Exception as e:
 					msg = 'Issues with parallel determination of the location of antiSMASH BGCs.'
 					sys.stderr.write(msg + '\n')
@@ -539,8 +566,10 @@ is preferred, users can issue the --keep_locus_tags option.
 
 					try:
 						with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-							executor.map(util.multiProcess, gecco_cmds)
-					except:
+							futures = [executor.submit(util.multiProcess, arg) for arg in gecco_cmds]
+							for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running GECCO"):
+								future.result()
+					except Exception as e:
 						msg = 'Issues with parallel running of GECCO commands.'
 						sys.stderr.write(msg + '\n')
 						logObject.error(msg)
@@ -651,8 +680,10 @@ is preferred, users can issue the --keep_locus_tags option.
 
 			try:
 				with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-					executor.map(util.multiProcess, run_prodigal_cmds)
-			except:
+					futures = [executor.submit(util.multiProcess, arg) for arg in run_prodigal_cmds]
+					for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running Prodigal"):
+						future.result()
+			except Exception as e:
 				msg = 'Issues with running gene calling.'
 				sys.stderr.write(msg + '\n')
 				logObject.error(msg)
@@ -671,8 +702,10 @@ is preferred, users can issue the --keep_locus_tags option.
 
 			try:
 				with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-					executor.map(util.multiProcess, gecco_cmds)
-			except:
+					futures = [executor.submit(util.multiProcess, arg) for arg in gecco_cmds]
+					for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running GECCO"):
+						future.result()
+			except Exception as e:
 				msg = 'Issues with parallel running of GECCO commands.'
 				sys.stderr.write(msg + '\n')
 				logObject.error(msg)
@@ -765,8 +798,10 @@ is preferred, users can issue the --keep_locus_tags option.
 
 			try:
 				with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-					executor.map(util.extractProteinsFromGenBank, extract_cds_inputs)
-			except:
+					futures = [executor.submit(util.extractProteinsFromGenBank, arg) for arg in extract_cds_inputs]
+					for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Extracting CDS proteins"):
+						future.result()
+			except Exception as e:
 				msg = 'Issues with parallel extraction of CDS proteins into FASTA files from GenBank files.'
 				sys.stderr.write(msg + '\n')
 				logObject.error(msg)
@@ -808,7 +843,7 @@ is preferred, users can issue the --keep_locus_tags option.
 		
 		try:
 			assert(os.path.isfile(ortholog_matrix_file))
-		except:
+		except Exception as e:
 			msg = 'Issues validating that the final ortholog by sample matrix exists: %s' % ortholog_matrix_file
 			sys.stderr.write(msg + '\n')
 			logObject.info(msg)
@@ -823,6 +858,8 @@ is preferred, users can issue the --keep_locus_tags option.
 	step_3_checkpoint_file = check_dir + 'Step_3.txt'
 	phylogenate_results_dir = outdir + 'Create_Species_Phylogeny/'
 	if not os.path.isfile(step_3_checkpoint_file):
+		lsabgc_phylogenate_stdout_file = log_dir + 'lsaBGC-phylogenate.stdout.txt'
+		lsabgc_phylogenate_stderr_file = log_dir + 'lsaBGC-phylogenate.stderr.txt'
 		phylogenate_cmd = ['phylogenate', '-m', ortholog_matrix_file, '-i', genome_wide_listing_file, '-mg', str(max_core_genes),
 					       '-p', str(phylogeny_core_proportion), '-c', str(threads), '-o', phylogenate_results_dir]
 
@@ -831,7 +868,8 @@ is preferred, users can issue the --keep_locus_tags option.
 			phylogenate_cmd += ['-hq']
 			species_tree_file = phylogenate_results_dir + 'Species_Phylogeny_IQTREE_Phylogeny_mset-WAG-LG_B-1000.treefile'
 
-		util.runCmdViaSubprocess(phylogenate_cmd, logObject=logObject, check_files=[species_tree_file])
+		util.runCmdViaSubprocess(phylogenate_cmd, logObject=logObject, check_files=[species_tree_file], 
+		                         stdout=lsabgc_phylogenate_stdout_file, stderr=lsabgc_phylogenate_stderr_file)
 		os.system('touch %s' % step_3_checkpoint_file)
 
 	concat_core_alignment_fasta_file = phylogenate_results_dir + 'Concatenated_MSA.fasta'
@@ -841,7 +879,7 @@ is preferred, users can issue the --keep_locus_tags option.
 	
 	try:
 		assert(os.path.isfile(species_tree_file) or os.path.isfile(concat_core_alignment_fasta_file))
-	except:
+	except Exception as e:
 		msg = 'Issue validating the existence of species phylogeny or concatenated core FASTA files'
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
@@ -853,11 +891,14 @@ is preferred, users can issue the --keep_locus_tags option.
 	logObject.info(msg)
 
 	popstrat_results_dir = outdir + 'Delineate_Populations/'
+	lsabgc_popstrat_stdout_file = log_dir + 'lsaBGC-popstrat.stdout.txt'
+	lsabgc_popstrat_stderr_file = log_dir + 'lsaBGC-popstrat.stderr.txt'
 	popstrat_cmd = ['popstrat', '-a', concat_core_alignment_fasta_file, '-p', species_tree_file, 
 					'-t', '-i', str(population_identify_cutoff), '-o', popstrat_results_dir]
 
 	popstrat_file = popstrat_results_dir + 'Sample_to_Population.txt'
-	util.runCmdViaSubprocess(popstrat_cmd, logObject=logObject, check_files=[popstrat_file])
+	util.runCmdViaSubprocess(popstrat_cmd, logObject=logObject, check_files=[popstrat_file],
+							 stdout=lsabgc_popstrat_stdout_file, stderr=lsabgc_popstrat_stderr_file)
 
 	# Step 5: Cluster BGCs into GCFs
 	msg = '--------------------\nStep 5: Clustering BGCs into GCFs\n--------------------'
@@ -871,8 +912,11 @@ is preferred, users can issue the --keep_locus_tags option.
                           '-c', str(threads), '-o', cluster_results_dir, '-r', str(cluster_syntenic_correlation),
                           '-x', str(zol_edge_distance), '-i', str(cluster_inflation_param), 
 						  '-y', str(cluster_containmment), '-j', str(cluster_jaccard_param), '-t']
- 
-	util.runCmdViaSubprocess(lsabgc_cluster_cmd, logObject=logObject, check_directories=[gcf_listing_dir], check_files=[cluster_pair_file])
+	lsabgc_cluster_stdout_file = log_dir + 'lsaBGC-Cluster.stdout.txt'
+	lsabgc_cluster_stderr_file = log_dir + 'lsaBGC-Cluster.stderr.txt'
+	util.runCmdViaSubprocess(lsabgc_cluster_cmd, logObject=logObject, check_directories=[gcf_listing_dir], 
+	                         check_files=[cluster_pair_file], stdout=lsabgc_cluster_stdout_file, 
+							 stderr=lsabgc_cluster_stderr_file)
 
 	gcf_count = 0
 	for f in os.listdir(gcf_listing_dir):
@@ -880,7 +924,7 @@ is preferred, users can issue the --keep_locus_tags option.
 	
 	try:
 		assert(gcf_count > 0)
-	except:
+	except Exception as e:
 		msg = 'No GCFs found in the GCF_Listings/ directory at: %s' % gcf_listing_dir
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
@@ -969,7 +1013,7 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 					line = line.strip()
 					ls = line.split('\t')
 					sample_to_pop[ls[0]] = ls[1]
-		except:
+		except Exception as e:
 			msg = 'Difficulties processing manual population specifications file.'
 			sys.stderr.write(msg + '\n')
 			sys.stderr.write(traceback.format_exc())
@@ -1016,8 +1060,11 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 	compsee_dir = visual_results_dir + 'lsaBGC_ComprehenSeeIve_Results/'
 	if not os.path.isfile(step_8_checkpoint_file):
 		util.setupReadyDirectory([see_dir, compsee_dir])
+		lsabgc_gseef_stdout_file = log_dir + 'GSeeF.stdout.txt'
+		lsabgc_gseef_stderr_file = log_dir + 'GSeeF.stderr.txt'	
 		gseef_cmd = ['GSeeF', '-g', detailed_BGC_listing_with_Pop_and_GCF_map_file, '-s', species_tree_file, '-o', gseef_dir]
-		util.runCmdViaSubprocess(gseef_cmd, logObject, check_directories=[gseef_dir])
+		util.runCmdViaSubprocess(gseef_cmd, logObject=logObject, check_directories=[gseef_dir],
+								 stdout=lsabgc_gseef_stdout_file, stderr=lsabgc_gseef_stderr_file)
 		util.runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, species_tree_file, ortholog_matrix_file, 
 								      see_dir, compsee_dir, threads, logObject)
 		os.system('touch %s' % step_8_checkpoint_file)
@@ -1046,14 +1093,19 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 	recon_pop_color_file = recon_scratch_dir + 'pop_colors_mapping.txt'
 	if not os.path.isfile(step_10_checkpoint_file):
 		util.setupReadyDirectory([recon_dir, recon_scratch_dir])
+		
 		lsabgc_reconcile_cmd = ['lsaBGC-Reconcile', '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, '-m', 
 						        ortholog_matrix_file, '-s', species_tree_file, '-o', recon_dir, '-sd', 
 								recon_scratch_dir, '-c', str(threads), '-t', str(alignment_timeout)]
 		if high_quality_reconcile_flag:
 			lsabgc_reconcile_cmd += ['-q']
+		lsabgc_reconcile_stdout_file = log_dir + 'lsaBGC-Reconcile.stdout.txt'
+		lsabgc_reconcile_stderr_file = log_dir + 'lsaBGC-Reconcile.stderr.txt'
 		util.runCmdViaSubprocess(lsabgc_reconcile_cmd, logObject=logObject, check_files=[recon_result_file, 
 																				         recon_og_result_file,
-																						 recon_pop_color_file])
+																						 recon_pop_color_file],
+																						 stdout=lsabgc_reconcile_stdout_file,
+																						 stderr=lsabgc_reconcile_stderr_file)
 		os.system('touch %s' % step_10_checkpoint_file)
 	
 	# Step 11: Parallel running of lsaBGC-Sociate
@@ -1070,7 +1122,10 @@ https://github.com/Kalan-Lab/lsaBGC-Pan/wiki/7.-guide-to-parameter-selections-du
 								'-vo', visual_sociated_dir, '-c', str(threads), '-t', str(alignment_timeout)]
 		if report_sociate_hits_flag:
 			lsabgc_sociate_cmd += ['-r']
-		util.runCmdViaSubprocess(lsabgc_sociate_cmd, logObject=logObject, check_files=[sociate_result_file])
+		lsabgc_sociate_stdout_file = log_dir + 'lsaBGC-Sociate.stdout.txt'
+		lsabgc_sociate_stderr_file = log_dir + 'lsaBGC-Sociate.stderr.txt'
+		util.runCmdViaSubprocess(lsabgc_sociate_cmd, logObject=logObject, check_files=[sociate_result_file],
+								 stdout=lsabgc_sociate_stdout_file, stderr=lsabgc_sociate_stderr_file)
 		os.system('touch %s' % step_11_checkpoint_file)
 
 	# Step 12: Create consolidated report of zol, lsaBGC-MIBiGMapper, lsaBGC-Reconcile, and lsaBGC-Sociate results

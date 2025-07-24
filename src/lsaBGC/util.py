@@ -10,7 +10,7 @@ from collections import defaultdict
 import traceback
 import concurrent.futures
 from ete3 import Tree
-import concurrent.futures
+from tqdm import tqdm
 import numpy as np
 import gzip
 import warnings
@@ -55,7 +55,7 @@ def reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject):
 							outf.write(lt + '\t' + og + '\n')
 		outf.close()
 		return (ortholog_listing_file)
-	except:
+	except Exception as e:
 		msg = 'Issue reformatting ortholog group matrix to table format for use as input for zol.'
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
@@ -123,7 +123,7 @@ def determineNonRepBGCs(sample, gcf, sample_gcf_bgcs, gcf_bgcs, bgc_pairwise_rel
 
 		assert(len(nonrep_bgcs) > 0)
 		return(nonrep_bgcs)
-	except:
+	except Exception as e:
 		msg = 'Issue selecting representative BGC for sample %s for GCF %s' % (sample, gcf)
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
@@ -164,8 +164,10 @@ def runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matr
 			lsabgc_map_cmds.append(lsabgc_map_cmd)
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-				executor.map(multiProcess, lsabgc_map_cmds)
-		except:
+				futures = [executor.submit(multiProcess, arg) for arg in lsabgc_map_cmds]
+				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running lsaBGC-MIBiGMapper"):
+					future.result()
+		except Exception as e:
 			msg = 'Issues with parallel running lsaBGC-MIBiGMapper commands.'
 			sys.stderr.write(msg + '\n')
 			logObject.error(msg)
@@ -173,7 +175,7 @@ def runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matr
 			logObject.error(traceback.format_exc())
 			sys.exit(1)
 
-	except:
+	except Exception as e:
 		msg = 'Issues running lsaBGC-MIBiGMapper'
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
@@ -220,8 +222,10 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 		os.environ["OMP_NUM_THREADS"] = "1"
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-				executor.map(multiProcess, lsabgc_see_and_csi_cmds)
-		except:
+				futures = [executor.submit(multiProcess, arg) for arg in lsabgc_see_and_csi_cmds]
+				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running lsaBGC-See and lsaBGC-ComprehenSeeIve"):
+					future.result()
+		except Exception as e:
 			msg = 'Issues with parallel running of lsaBGC-See and lsaBGC-ComprehenSeeIve commands.'
 			sys.stderr.write(msg + '\n')
 			logObject.error(msg)
@@ -229,7 +233,7 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 			logObject.error(traceback.format_exc())
 			sys.exit(1)
 		os.environ["OMP_NUM_THREADS"] = "4"
-	except:
+	except Exception as e:
 		msg = 'Issues running lsaBGC-See and lsaBGC-ComprehenSeeIve'
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
@@ -274,7 +278,7 @@ def computeConservationOfOGWithinGCFContext(inputs):
 			og_bgc_prop = len(og_bgcs[og])/float(len(bgc_paths))
 			outf.write(og + '\t' + str(og_bgc_prop) + '\n')
 		outf.close()	
-	except:
+	except Exception as e:
 		msg = 'Issues computing conservation of orthogroups for complete instances of GCF %s' % output_file.split('/')[-1].split('.txt')[0]
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
@@ -363,8 +367,10 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-				executor.map(computeConservationOfOGWithinGCFContext, complete_conservation_inputs)			
-		except:
+				futures = [executor.submit(computeConservationOfOGWithinGCFContext, arg) for arg in complete_conservation_inputs]
+				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Computing conservation of orthogroups"):
+					future.result()
+		except Exception as e:
 			msg = 'Issues with parallel computing of orthogroup conservations across complete instances.'
 			sys.stderr.write(msg + '\n')
 			logObject.error(msg)
@@ -374,8 +380,10 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-				executor.map(multiProcess, zol_cmds)
-		except:
+				futures = [executor.submit(multiProcess, arg) for arg in zol_cmds]
+				for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running zol"):
+					pass
+		except Exception as e:
 			msg = 'Issues with parallel running of zol commands.'
 			sys.stderr.write(msg + '\n')
 			logObject.error(msg)
@@ -385,8 +393,10 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-				executor.map(multiProcess, cgc_cmds)
-		except:
+				futures = [executor.submit(multiProcess, arg) for arg in cgc_cmds]
+				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running cgc"):
+					future.result()
+		except Exception as e:
 			msg = 'Issues with parallel running of cgc commands.'
 			sys.stderr.write(msg + '\n')
 			logObject.error(msg)
@@ -394,7 +404,7 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 			logObject.error(traceback.format_exc())
 			sys.exit(1)
 
-	except:
+	except Exception as e:
 		msg = 'Issues running zol or cgc'
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
@@ -402,7 +412,7 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 		sys.exit(1)
 
 
-def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[]):
+def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL):
 	"""
 	Description:
 	Void function to run a command using python's subprocess. 
@@ -417,7 +427,12 @@ def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[
 	if logObject != None:
 		logObject.info('Running %s' % ' '.join(cmd))
 	try:
-		subprocess.call(' '.join(cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+		if isinstance(stdout, str):
+			stdout = open(stdout, 'w')
+		if isinstance(stderr, str):
+			stderr = open(stderr, 'w')
+
+		subprocess.call(' '.join(cmd), shell=True, stdout=stdout, stderr=stderr,
 						executable='/bin/bash')
 		for cf in check_files:
 			assert (os.path.isfile(cf))
@@ -425,7 +440,7 @@ def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[
 			assert (os.path.isdir(cd))
 		if logObject != None:
 			logObject.info('Successfully ran: %s' % ' '.join(cmd))
-	except:
+	except Exception as e:
 		if logObject != None:
 			logObject.error('Had an issue running: %s' % ' '.join(cmd))
 			logObject.error(traceback.format_exc())
@@ -458,7 +473,7 @@ def mapColorsToCategories(categories_set, colors_file, colors_mapping_file):
 			cmf_handle.write(cat + '\t"' + colors[i] + '"\n')
 		cmf_handle.close()
 	
-	except:
+	except Exception as e:
 		msg = 'Issue mapping colors from file to categories, potentially because too few colors provided.'
 		sys.stderr.write(msg + '\n')
 		sys.stderr.write(traceback.format_exc() + '\n')
@@ -481,7 +496,7 @@ def pairwiseDistancesFromTree(tree_file, logObject):
 	try:
 		try:
 			t = Tree(tree_file)
-		except:
+		except Exception as e:
 			return(pairwise_distances)
 		
 		leaves = set([])
@@ -499,7 +514,7 @@ def pairwiseDistancesFromTree(tree_file, logObject):
 					pairwise_distances[l2][l1] = dist
 		
 		return(pairwise_distances)
-	except:	
+	except Exception as e:	
 		msg = 'Issue with calculating pairwise distances between leaves in the tree file: %s' % tree_file
 		logObject.error(msg)
 		sys.stderr.write(msg + '\n')
@@ -533,74 +548,76 @@ def generateColors(workspace, outfile, color_count, palette='Spectral', palette_
 		rscript_cmd = ['Rscript', color_brew_script]
 		runCmdViaSubprocess(rscript_cmd, check_files=[outfile])
 
-	except:
+	except Exception as e:
 		msg = 'Issues generating colors!'
 		sys.stderr.write(msg + '\n')
 		sys.exit(1)
 
-def parseCDSCoord(str_gbk_loc):
+def parseCDSCoord(location_string):
 	"""
 	Description:
-	Function to parse a string from a GenBank feature's coordinates.
+	Function to process a location string from a GenBank file.
 	********************************************************************************************************************
 	Parameters:
-	- str_gbk_loc: The string value of the feature coordinate from a GenBank file being parsed by Biopython.
+	- location_string: The location string to process.
+	********************************************************************************************************************
+	Returns:
+	- A list of items: [start, end, direction, all_coords]
 	********************************************************************************************************************
 	"""
 	try:
-		start = None
-		end = None
-		direction = None
+		all_starts = []
+		all_ends = []
 		all_coords = []
-		is_multi_part = False
-		if not 'join' in str(str_gbk_loc) and not 'order' in str(str_gbk_loc):
-			start = min([int(x.strip('>').strip('<')) for x in
-						 str(str_gbk_loc)[1:].split(']')[0].split(':')]) + 1
-			end = max([int(x.strip('>').strip('<')) for x in
-					   str(str_gbk_loc)[1:].split(']')[0].split(':')])
-			direction = str(str_gbk_loc).split('(')[1].split(')')[0]
+		direction = None
+		if "order" in str(location_string):
+			all_directions = [] # type: ignore
+			for exon_coord in location_string[6:-1].split(", "):
+				start = (min([int(x.strip(">").strip("<")) for x in exon_coord[1:].split("]")[0].split(":")])+ 1)
+				end = max([int(x.strip(">").strip("<")) for x in exon_coord[1:].split("]")[0].split(":")])
+				direction = exon_coord.split("(")[1].split(")")[0]
+				all_starts.append(start)
+				all_ends.append(end)
+				all_directions.append(direction)
+				all_coords.append([start, end, direction])
+			start = min(all_starts)
+			end = max(all_ends)
+			assert len(set(all_directions)) == 1
+			direction = all_directions[0]
+		elif "join" in location_string:
+			all_directions = []
+			for exon_coord in location_string[5:-1].split("\t"):
+				start = (min([int(x.strip(">").strip("<")) for x in exon_coord[1:].split("]")[0].split(":")])+ 1)
+				end = max([int(x.strip(">").strip("<")) for x in exon_coord[1:].split("]")[0].split(":")])
+				direction = exon_coord.split("(")[1].split(")")[0]
+				all_starts.append(start)
+				all_ends.append(end)
+				all_directions.append(direction)
+				all_coords.append([start, end, direction])
+			start = min(all_starts)
+			end = max(all_ends)
+			assert len(set(all_directions)) == 1
+			direction = all_directions[0]
+		elif "{" not in location_string:
+			start = (min([int(x.strip(">").strip("<")) for x in location_string[1:].split("]")[0].split(":")])+ 1)
+			end = max([int(x.strip(">").strip("<")) for x in location_string[1:].split("]")[0].split(":")])
+			direction = location_string.split("(")[1].split(")")[0]
+			all_starts.append(start)
+			all_ends.append(end)
 			all_coords.append([start, end, direction])
-		elif 'order' in str(str_gbk_loc):
-			is_multi_part = True
-			all_starts = []
-			all_ends = []
-			all_directions = []
-			for exon_coord in str(str_gbk_loc)[6:-1].split(', '):
-				ec_start = min(
-					[int(x.strip('>').strip('<')) for x in exon_coord[1:].split(']')[0].split(':')]) + 1
-				ec_end = max(
-					[int(x.strip('>').strip('<')) for x in exon_coord[1:].split(']')[0].split(':')])
-				ec_direction = exon_coord.split('(')[1].split(')')[0]
-				all_starts.append(ec_start)
-				all_ends.append(ec_end)
-				all_directions.append(ec_direction)
-				all_coords.append([ec_start, ec_end, ec_direction])
-			assert (len(set(all_directions)) == 1)
-			start = min(all_starts)
-			end = max(all_ends)
-			direction = all_directions[0]
 		else:
-			is_multi_part = True
-			all_starts = []
-			all_ends = []
-			all_directions = []
-			for exon_coord in str(str_gbk_loc)[5:-1].split(', '):
-				ec_start = min(
-					[int(x.strip('>').strip('<')) for x in exon_coord[1:].split(']')[0].split(':')]) + 1
-				ec_end = max(
-					[int(x.strip('>').strip('<')) for x in exon_coord[1:].split(']')[0].split(':')])
-				ec_direction = exon_coord.split('(')[1].split(')')[0]
-				all_starts.append(ec_start)
-				all_ends.append(ec_end)
-				all_directions.append(ec_direction)
-				all_coords.append([ec_start, ec_end, ec_direction])
-			assert (len(set(all_directions)) == 1)
-			start = min(all_starts)
-			end = max(all_ends)
-			direction = all_directions[0]
-		return(all_coords, start, end, direction, is_multi_part)
+			msg = 'Error: There appears to be a location operator that is neither "join" nor "order". This is currently not supported in lsaBGC-Pan.'
+			sys.stderr.write(msg + "\n")
+			raise RuntimeError(f"Error processing location string {location_string}")
+
+		is_multi_part = False
+		if len(all_coords) > 1: is_multi_part = True
+		return [all_coords, start, end, direction, is_multi_part] # type: ignore
 	except Exception as e:
-		raise RuntimeError(traceback.format_exc())
+		sys.stderr.write(traceback.format_exc())
+		raise RuntimeError(
+			f"Error processing location string {location_string}"
+		)
 
 def cleanUpSampleName(original_name):
 	"""
@@ -639,15 +656,15 @@ def parseGECCOGBKForFunction(bgc_gbk, logObject):
 		product = 'unknown'
 		try:
 			product = rec.annotations['structured_comment']['GECCO-Data']['biosyn_class']
-		except:
+		except Exception as e:
 			try:
 				product = rec.annotations['structured_comment']['GECCO-Data']['cluster_type']
-			except:
+			except Exception as e:
 				pass
 		if product == 'Unknown':
 			product = 'unknown'
 		return(product)
-	except:
+	except Exception as e:
 		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
 		raise RuntimeError()
 
@@ -673,7 +690,7 @@ def parseAntiSMASHGBKForFunction(bgc_gbk, logObject, compress_multi=True):
 					if feat.type == 'protocluster':
 						try:
 							products.add(feat.qualifiers.get('product')[0])
-						except:
+						except Exception as e:
 							pass
 		if len(products) == 1:
 			product = list(products)[0]
@@ -684,12 +701,12 @@ def parseAntiSMASHGBKForFunction(bgc_gbk, logObject, compress_multi=True):
 				product = 'multi-type'
 			else:
 				product = ' | '.join(sorted(products))
-	except:
+	except Exception as e:
 		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
 		raise RuntimeError()
 	return(product)
 
-def parseOrthoFinderMatrix(orthofinder_matrix_file, relevant_gene_lts, all_primary=False):
+def parseOrthoFinderMatrix(orthofinder_matrix_file, relevant_gene_lts, all_primary=True):
 	"""
 	Description:	
 	Function to parse and return information from OrthoFinderV2 de novo homolog group identification.
@@ -729,10 +746,12 @@ def parseOrthoFinderMatrix(orthofinder_matrix_file, relevant_gene_lts, all_prima
 					# use only genes from the original set of genomes used to conduct full orthofinder analysis.
 					gene_counts.append(len([x for x in sgs.split(', ') if (len(x.split('_')[0]) == 3 or all_primary)]))
 
-				hg_multicopy_proportion[hg] = float(sum([1 for x in gene_counts if x > 1])) / sum(
-					[1 for x in gene_counts if x > 0])
-				hg_median_gene_counts[hg] = statistics.median(gene_counts)
-
+				try:
+					hg_multicopy_proportion[hg] = float(sum([1 for x in gene_counts if x > 1])) / sum(
+						[1 for x in gene_counts if x > 0])
+					hg_median_gene_counts[hg] = statistics.median(gene_counts)
+				except Exception as e:
+					print(line)
 	return ([gene_to_hg, hg_genes, hg_median_gene_counts, hg_multicopy_proportion])
 
 def run_cmd(cmd, logObject, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL):
@@ -860,13 +879,14 @@ def addLocusTagsToGBKs(inputs):
 					if keep_ids_flag:
 						try:
 							cds_lt = feat.qualifiers.get('locus_tag')[0]
-						except:
-							try:
-								cds_lt = feat.qualifiers.get('protein_id')[0]
-							except:
-								msg = 'Issue finding either locus_tag or protein_id associated with CDS feature at %s' % str(feat.location)
-								sys.stderr.write(msg + '\n')
-								sys.exit(1)
+						except Exception as e:
+							#try:
+							#	cds_lt = feat.qualifiers.get('protein_id')[0]
+							#except Exception as e:
+							msg = f'Issue finding a locus_tag associated with CDS feature at { str(feat.location)} of scaffold {scaff}'
+							sys.stderr.write(msg + '\n')
+							logObject.info(msg)
+							sys.exit(1)
 
 					all_coords, start, end, direction, is_multi_part = parseCDSCoord(str(feat.location))
 					loctup = tuple([scaff, start])
@@ -931,10 +951,10 @@ def addLocusTagsToGBKs(inputs):
 
 	except Exception as e:
 		msg = "Problem processing one of the GenBank files for sample %s to add CDS locus tags." % sample
-		sys.stderr.write(msg + '\n')
-		sys.stderr.write(traceback.format_exc() + '\n')
 		logObject.warning(msg)
 		logObject.warning(traceback.format_exc())
+		sys.stderr.write(msg)
+		raise RuntimeError(msg)
 
 def checkCDSHaveLocusTags(inputs):
 	"""
@@ -961,8 +981,9 @@ def checkCDSHaveLocusTags(inputs):
 					locus_tag = None
 					try:
 						locus_tag = feat.qualifiers.get('locus_tag')[0]
-					except:
+					except Exception as e:
 						pass
+
 					cds_count += 1
 					if locus_tag == None:
 						all_cds_have_lt = False
@@ -973,6 +994,7 @@ def checkCDSHaveLocusTags(inputs):
 	except Exception as e:
 		logObject.warning("Problem processing GenBank file %s for sample %s" % (gbk, sample))
 		logObject.warning(traceback.format_exc())
+		raise RuntimeWarning()
 
 def findAntiSMASHBGCInFullGenbank(inputs):
 	"""
@@ -988,35 +1010,40 @@ def findAntiSMASHBGCInFullGenbank(inputs):
 	********************************************************************************************************************
 	"""
 	try:
-		full_gbk, bgc_gbk, outf = inputs
+		sample, genome_gbk, sample_bgc_info_tuples = inputs
+		full_genome_index = SeqIO.index(genome_gbk, 'genbank')
 
-		bgc_starts = []
-		with open(bgc_gbk) as ogbf:
-			for line in ogbf:
-				line = line.strip()
-				if line.startswith('Orig. start') and '::' in line:
-					bgc_starts.append(int(line.split()[-1].replace('>', '').replace('<', '')))			
+		for bgc_gbk, outf in sample_bgc_info_tuples:
+			bgc_starts = []
+			with open(bgc_gbk) as ogbf:
+				for line in ogbf:
+					line = line.strip()
+					if line.startswith('Orig. start') and '::' in line:
+						bgc_starts.append(int(line.split()[-1].replace('>', '').replace('<', '')))			
 
-		bgc_scaffold = None
-		bgc_length = 0
-		with open(bgc_gbk) as obg:
-			for rec in SeqIO.parse(obg, 'genbank'):
-				bgc_scaffold = rec.id
-				bgc_length = len(str(rec.seq))
+			bgc_scaffold = None
+			bgc_length = 0
+			with open(bgc_gbk) as obg:
+				for rec in SeqIO.parse(obg, 'genbank'):
+					bgc_scaffold = rec.id
+					bgc_length = len(str(rec.seq))
 
-		full_scaff_length = None
-		with open(full_gbk) as ofg:
-			for rec in SeqIO.parse(ofg, 'genbank'):
-				if rec.id == bgc_scaffold:
-					full_scaff_length = len(str(rec.seq))
+			full_scaff_length = None
+			try:
+				scaff_rec_with_bgc = full_genome_index[rec.id]
+				full_scaff_length = len(str(scaff_rec_with_bgc.seq))		
+				assert(full_scaff_length != None)				
+			except Exception as e2:
+				msg = f'Issue finding the location of the BGC {bgc_gbk} for sample {sample}.'
+				raise RuntimeWarning(msg)
+				return
 
-		assert(full_scaff_length != None)				
-		outf_handle = open(outf, 'w')
-		for start_coord in bgc_starts:
-			end_coord = start_coord + bgc_length - 1
-			outf_handle.write(bgc_scaffold + '\t' + str(start_coord) + '\t' + str(end_coord) + '\t' + str(min([start_coord, full_scaff_length-end_coord])) + '\n')
-		outf_handle.close()
-
+			outf_handle = open(outf, 'w')
+			for start_coord in bgc_starts:
+				end_coord = start_coord + bgc_length - 1
+				outf_handle.write(bgc_scaffold + '\t' + str(start_coord) + '\t' + str(end_coord) + '\t' + str(min([start_coord, full_scaff_length-end_coord])) + '\n')
+			outf_handle.close()
+			
 	except Exception as e:
 		raise RuntimeWarning(traceback.format_exc())
 
@@ -1052,7 +1079,9 @@ def processAntiSMAHSBGCtoGenomeMappingResults(process_data, logObject):
 		bgc_locations = []
 		for bgc in loc_lists:
 			if len(loc_lists[bgc]) != 1: 
-				sys.stderr.write('Warning: no location or more than 2 potential locations for BGC region %s. Skipping incorporation.' % bgc)
+				msg = f'Warning: no location or more than 2 potential locations for BGC region {bgc}. Skipping incorporation.'
+				logObject.warning(msg)
+				sys.stderr.write(msg + '\n')
 				continue
 			else:
 				bgc_locations.append([bgc] + loc_lists[bgc][0])
@@ -1064,7 +1093,7 @@ def processAntiSMAHSBGCtoGenomeMappingResults(process_data, logObject):
 		logObject.error(msg)
 		logObject.error(traceback.format_exc())
 		sys.stderr.write(traceback.format_exc())
-		sys.exit(1)
+		raise RuntimeError(msg)
 
 def extractProteinsFromGenBank(inputs):
 	"""
@@ -1085,9 +1114,15 @@ def extractProteinsFromGenBank(inputs):
 			for rec in SeqIO.parse(oigf, 'genbank'):
 				for feature in rec.features:
 					if feature.type == 'CDS':
-						prot_lt = feature.qualifiers.get('locus_tag')[0]
-						prot_seq = str(feature.qualifiers.get('translation')[0]).replace('*', '')
-						op_handle.write('>' + prot_lt + '\n' + prot_seq + '\n')
+						try:
+							prot_lt = feature.qualifiers.get('locus_tag')[0]
+							prot_seq = str(feature.qualifiers.get('translation')[0]).replace('*', '')
+							op_handle.write('>' + prot_lt + '\n' + prot_seq + '\n')
+						except Exception as e:
+							msg = f'Warning: no locus_tag or protein_id for feature {feature.type} in GenBank file {input_genbank}. Skipping.'
+							sys.stderr.write(msg + '\n')
+							logObject.warning(msg)
+							pass
 		op_handle.close()
 	except Exception as e:
 		logObject.error("Issues with parsing out protein sequences from GenBank file %s." % input_genbank) 
@@ -1462,8 +1497,10 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-				executor.map(multiProcess, reformat_cmds)
-		except:
+				futures = [executor.submit(multiProcess, arg) for arg in reformat_cmds]
+				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Creating Prokka-like GFF files for Panaroo"):
+					future.result()
+		except Exception as e:
 			msg = 'Issues creating Prokka-like GFF files for Panaroo.'
 			sys.stderr.write(msg + '\n')
 			logObject.error(msg)
@@ -1476,7 +1513,7 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 			subprocess.call(' '.join(panaroo_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 							executable='/bin/bash')
 			logObject.info('Successfully ran Panaroo!')
-		except:
+		except Exception as e:
 			msg = 'Issue running Panaroo with the following command: %s' % ' '.join(panaroo_cmd)
 			sys.stderr.write(msg + '\n')
 			logObject.error(msg)
@@ -1510,7 +1547,13 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 				for rec in SeqIO.parse(ogbk, 'genbank'):
 					for feat in rec.features:
 						if not feat.type == 'CDS': continue
-						lt = feat.qualifiers.get('locus_tag')[0]
+						try:
+							lt = feat.qualifiers.get('locus_tag')[0]
+						except Exception as e:
+							msg = f'Warning: no locus tag for feature {feat.type} in GenBank file {gbk}. Skipping.'
+							sys.stderr.write(msg + '\n')
+							continue
+
 						if not lt in clustered_lts:
 							og_id = 'OG' + determineAsofName(cds_iter)
 							cds_iter += 1
@@ -1565,7 +1608,7 @@ def is_newick(newick):
 	try:
 		t = Tree(newick)
 		return True
-	except:
+	except Exception as e:
 		return False
 
 
@@ -1577,7 +1620,7 @@ def is_fastq(fastq):
 		with open(fastq) as of:
 			SeqIO.parse(of, 'fastq')
 		return True
-	except:
+	except Exception as e:
 		return False
 
 
@@ -1593,7 +1636,7 @@ def is_fasta(fasta):
 			with open(fasta) as of:
 				SeqIO.parse(of, 'fasta')
 		return True
-	except:
+	except Exception as e:
 		return False
 
 
@@ -1610,7 +1653,7 @@ def is_genbank(gbk):
 			with open(gbk) as of:
 				SeqIO.parse(of, 'genbank')
 		return True
-	except:
+	except Exception as e:
 		return False
 	
 def createLoggerObject(log_file):
@@ -1751,7 +1794,7 @@ def castToNumeric(x):
 		else:
 			x = float(x)
 			return (x)
-	except:
+	except Exception as e:
 		return float('nan')
 
 def loadTableInPandaDataFrame(input_file, numeric_columns):
@@ -1998,7 +2041,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			try:
 				subprocess.call(' '.join(wget_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, executable='/bin/bash')
 				assert (os.path.isfile(mibig_json_tar_file))
-			except:
+			except Exception as e:
 				sys.stderr.write('Had an issue running: %s\n' % ' '.join(wget_cmd))
 				sys.stderr.write(traceback.format_exc())
 				sys.exit(1)
@@ -2008,7 +2051,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 				os.mkdir(mibig_json_tar_dir)
 				subprocess.call(' '.join(uncompress_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, executable='/bin/bash')
 				assert (os.path.isdir(mibig_json_tar_dir))
-			except:
+			except Exception as e:
 				sys.stderr.write('Had an issue running: %s\n' % ' '.join(uncompress_cmd))
 				sys.stderr.write(traceback.format_exc())
 				sys.exit(1)
@@ -2097,7 +2140,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 
 		# close workbook 
 		workbook.close()
-	except:
+	except Exception as e:
 		msg = 'Difficulties creating final multi-sheet spreadsheet XLSX file!'
 		logObject.error(msg)
 		sys.stderr.write(msg +  '\n')

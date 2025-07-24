@@ -92,7 +92,7 @@ def mapToMIBiG():
 	try:
 		assert(os.path.isfile(orthofinder_matrix_file))
 		assert(os.path.isfile(lsabgc_detailed_listing))
-	except:
+	except Exception as e:
 		raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
 
 	if os.path.isdir(outdir):
@@ -134,7 +134,7 @@ def mapToMIBiG():
 			zol_data_directory = os.path.abspath(zol_data_directory) + '/'
 			db_locations = zol_data_directory + 'database_location_paths.txt'
 			conda_setup_success = True
-		except:
+		except Exception as e:
 			conda_setup_success = False
 	if zol_data_directory == 'None' or conda_setup_success == False:
 		db_locations = '/'.join(os.path.realpath(__file__).split('/')[:-2]) + '/db/database_location_paths.txt'
@@ -155,7 +155,7 @@ def mapToMIBiG():
 					if ls[0] == 'mibig':
 						mibig_info_file, mibig_db_file = ls[1:-1]
 						assert (os.path.isfile(mibig_info_file) and os.path.isfile(mibig_db_file))
-	except:
+	except Exception as e:
 		msg = "It appears the MIBiG database was not setup or setup successfully. Please run/rerun the script setup_annotation_dbs.py and report to Github issues if issue persists."
 		sys.stderr.write(msg + '\n')
 		logObject.error(msg)
@@ -207,7 +207,7 @@ def mapToMIBiG():
 						executable='/bin/bash')
 		assert (os.path.isfile(diamond_result_file))
 		logObject.info('Successfully ran: %s' % ' '.join(diamond_cmd))
-	except:
+	except Exception as e:
 		logObject.error('Had an issue running: %s' % ' '.join(diamond_cmd))
 		logObject.error(traceback.format_exc())
 		raise RuntimeError('Had an issue running: %s' % ' '.join(diamond_cmd))
@@ -361,7 +361,7 @@ def mapToMIBiG():
 							corr = abs(corr)
 							if (pval < 0.1) and ((best_corr and best_corr < corr) or (not best_corr)):
 								best_corr = corr
-					except:
+					except Exception as e:
 						raise RuntimeError(traceback.format_exc())
 
 					if best_corr != None and best_corr >= correlation_cutoff:

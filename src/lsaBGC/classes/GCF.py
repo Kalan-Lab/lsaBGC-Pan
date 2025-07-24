@@ -13,6 +13,8 @@ from pomegranate import *
 import math
 import warnings
 from Bio import SeqIO
+from tqdm import tqdm
+import sys
 
 warnings.filterwarnings('ignore')
 
@@ -633,7 +635,7 @@ class GCF(Pan):
 		- outdir: Path to output/workspace directory. Intermediate files (like extracted nucleotide and protein
 				  sequences, protein and codon alignments, will be writen to respective subdirectories underneath this
 				  one).
-		- threads: Number of threads/threads to use when fake-parallelizing jobs using multiprocessing.
+		- threads: Number of threads to use.
 		- only_scc: Whether to construct codon alignments only for homolog groups which are found to be core and in
 					single copy for samples with the GCF. Note, if working with draft genomes and the BGC is fragmented
 					this should be able to still identify SCC homolog groups across the BGC instances belonging to the
@@ -692,9 +694,19 @@ class GCF(Pan):
 					gene_sequences = util.determineOutliersByGeneLength(gene_sequences, self.logObject)
 				inputs.append([hg, gene_sequences, nucl_seq_dir, prot_seq_dir, prot_alg_dir, codo_alg_dir, multi_thread, use_ms5, self.logObject])
 
-			with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-				executor.map(create_codon_msas, inputs)
-			
+			try:
+				with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+					futures = [executor.submit(create_codon_msas, arg) for arg in inputs]
+					for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Constructing codon alignments"):
+						future.result()
+			except Exception as e:
+				msg = 'Issues with constructing codon alignments for homolog groups.'
+				sys.stderr.write(msg + '\n')
+				self.logObject.error(msg)
+				sys.stderr.write(traceback.format_exc())
+				self.logObject.error(traceback.format_exc())
+				raise RuntimeError(traceback.format_exc())
+
 			if not filter_outliers:
 				self.nucl_seq_dir = nucl_seq_dir
 				self.prot_seq_dir = prot_seq_dir

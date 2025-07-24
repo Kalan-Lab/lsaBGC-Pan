@@ -43,7 +43,6 @@ from lsaBGC import util
 import warnings
 from collections import defaultdict
 from Bio import SeqIO
-import multiprocessing
 import traceback
 import math
 import statistics
@@ -96,7 +95,7 @@ def lsaBGC_Reconcile():
     try:
         assert (os.path.isfile(orthofinder_matrix_file))
         assert (os.path.isfile(lsabgc_detailed_listing))
-    except:
+    except Exception as e:
         raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
 
     if os.path.isdir(outdir):
@@ -180,7 +179,12 @@ def lsaBGC_Reconcile():
                 for rec in SeqIO.parse(obp, 'genbank'):
                     for feat in rec.features:
                         if feat.type != 'CDS': continue 
-                        lt = feat.qualifiers.get('locus_tag')[0]
+                        try:
+                            lt = feat.qualifiers.get('locus_tag')[0]
+                        except Exception as e:
+                            msg = f'Warning: no locus_tag for feature {feat.type} in GenBank file {bgc_path}. Skipping.'
+                            sys.stderr.write(msg + '\n')
+                            continue
                         og = lt_to_og[lt]
                         bgc_lts.add(lt)
                         bgc_ogs.add(og)
@@ -209,7 +213,13 @@ def lsaBGC_Reconcile():
         with open(sample_gbk) as osg:
             for rec in SeqIO.parse(osg, 'genbank'):
                 for feat in rec.features:
-                    lt = feat.qualifiers.get('locus_tag')[0]
+                    if feat.type != 'CDS': continue
+                    try:
+                        lt = feat.qualifiers.get('locus_tag')[0]
+                    except Exception as e:
+                        msg = f'Warning: no locus_tag for feature {feat.type} in GenBank file {sample_gbk}. Skipping.'
+                        sys.stderr.write(msg + '\n')
+                        continue
                     og = lt_to_og[lt]
                     if og in bgc_ogs:
                         if not lt in bgc_lts:
@@ -447,7 +457,7 @@ def plotLegend(color_file, color_legend_pdf, scratchdir, logObject):
 		
         rscript_cmd = ['Rscript', legend_script]
         util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[color_legend_pdf])
-    except:
+    except Exception as e:
         msg = 'Issues creating legends for coloring of populations/GCFs.'
         sys.stderr.write(msg + '\n')   
         sys.stderr.write(traceback.format_exc() + '\n')
@@ -492,7 +502,7 @@ def runPlotting(inputs):
 		
         rscript_cmd = ['Rscript', og_rscript_file]
         util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[og_pdf_file])
-    except:
+    except Exception as e:
         msg = 'Issues running creation of orthogroup gene tree phylogeny for phylogeny: %s' % og_prot_tre
         sys.stderr.write(msg + '\n')
         logObject.error(msg)

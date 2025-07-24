@@ -13,7 +13,7 @@ from lsaBGC import util
 gecco_pickle_weights_file = None
 try:
 	gecco_pickle_weights_file = os.environ["GECCO_DOMAIN_WEIGHTS_PKL_FILE"]
-except:
+except Exception as e:
 	pass 
 
 class BGC:
@@ -43,15 +43,15 @@ class BGC:
 				dom_weight = -7
 				try:
 					aSDomain = feature.qualifiers['standard_name'][0]
-				except:
+				except Exception as e:
 					pass
 				try:
 					description = feature.qualifiers['function'][0]
-				except:
+				except Exception as e:
 					pass
 				try:
 					dom_weight = gecco_pfam_weights[aSDomain]
-				except:
+				except Exception as e:
 					pass
 				domain_weights[aSDomain + '|' + str(start+1) + '|' + str(end)] = dom_weight
 				domains.append({'start': start + 1, 'end': end, 'type': feature.type, 'aSDomain': aSDomain, 'description': description, 'is_multi_part': False})
@@ -59,10 +59,10 @@ class BGC:
 		product = 'NA'
 		try:
 			product = rec.annotations['structured_comment']['GECCO-Data']['biosyn_class']
-		except:
+		except Exception as e:
 			try:
 				product = rec.annotations['structured_comment']['GECCO-Data']['cluster_type']
-			except:
+			except Exception as e:
 				pass
 		bgc_info = [{'prediction_method': self.prediction_method, 'detection_rule': 'NA', 'product': product, 'contig_edge': 'NA', 'full_sequence': full_sequence}]
 
@@ -80,14 +80,20 @@ class BGC:
 
 		for feature in rec.features:
 			if feature.type == "CDS":
-				lt = feature.qualifiers.get('locus_tag')[0]
+				try:
+					lt = feature.qualifiers.get('locus_tag')[0]
+				except Exception as e:
+					msg = f'Warning: no locus tag for feature {feature.type} in GenBank file {self.bgc_genbank}. Skipping.'
+					sys.stderr.write(msg + '\n')
+					continue
+					
 				start = feature.location.start + 1
 				end = feature.location.end
 				direction = "-" if feature.location.strand == -1 else "+"
 
 				try:
 					product = feature.qualifiers.get('product')[0]
-				except:
+				except Exception as e:
 					product = "hypothetical protein"
 
 				grange = set(range(start, end + 1))
@@ -106,7 +112,13 @@ class BGC:
 
 				prot_seq, nucl_seq, nucl_seq_with_flanks, relative_start, relative_end = [None] * 5
 				if comprehensive_parsing:
-					prot_seq = feature.qualifiers.get('translation')[0]
+					try:
+						prot_seq = feature.qualifiers.get('translation')[0]
+					except Exception as e:
+						msg = f'Warning: no translation for feature {feature.type} in GenBank file {self.bgc_genbank}. Skipping.'
+						sys.stderr.write(msg + '\n')
+						continue
+						#raise RuntimeWarning(msg)
 
 					flank_start = start - flank_size
 					flank_end = end + flank_size
@@ -180,11 +192,11 @@ class BGC:
 						description = "NA"
 						try:
 							aSDomain = feature.qualifiers.get('aSDomain')[0]
-						except:
+						except Exception as e:
 							pass
 						try:
 							description = feature.qualifiers.get('description')[0]
-						except:
+						except Exception as e:
 							pass
 						domains.append({'start': start, 'end': end, 'type': feature.type, 'aSDomain': aSDomain,
 										'description': description, 'is_multi_part': is_multi_part})
@@ -192,7 +204,7 @@ class BGC:
 						detection_rule = feature.qualifiers.get('detection_rule')[0]
 						try:
 							product = feature.qualifiers.get('product')[0]
-						except:
+						except Exception as e:
 							product = "NA"
 						contig_edge = feature.qualifiers.get('contig_edge')[0]
 						bgc_info.append(
@@ -224,19 +236,25 @@ class BGC:
 			for rec in SeqIO.parse(ogbk, 'genbank'):
 				for feature in rec.features:
 					if feature.type == "CDS":
-						lt = feature.qualifiers.get('locus_tag')[0]
+						try:
+							lt = feature.qualifiers.get('locus_tag')[0]
+						except Exception as e:
+							msg = f'Warning: no locus tag for feature {feature.type} in GenBank file {self.bgc_genbank}. Skipping.'
+							sys.stderr.write(msg + '\n')
+							continue
+
 						all_coords, start, end, direction, is_multi_part = util.parseCDSCoord(str(feature.location))
 
 						try:
 							product = feature.qualifiers.get('product')[0]
-						except:
+						except Exception as e:
 							product = "hypothetical protein"
 
 						rule_based_bgc_cds = False
 						try:
 							if 'rule-based-clusters' in feature.qualifiers.get('gene_functions')[0]:
 								rule_based_bgc_cds = True
-						except:
+						except Exception as e:
 							pass
 
 						grange = set(range(start, end + 1))
@@ -249,7 +267,13 @@ class BGC:
 
 						prot_seq, nucl_seq, nucl_seq_with_flanks, relative_start, relative_end, gene_domains = [None] * 6
 						if comprehensive_parsing:
-							prot_seq = feature.qualifiers.get('translation')[0]
+							try:
+								prot_seq = feature.qualifiers.get('translation')[0]
+							except Exception as e:
+								msg = f'Warning: no translation for feature {feature.type} in GenBank file {self.bgc_genbank}. Skipping.'
+								sys.stderr.write(msg + '\n')
+								continue
+						
 							gene_domains = []
 							for d in domains:
 								drange = set(range(d['start'], d['end'] + 1))

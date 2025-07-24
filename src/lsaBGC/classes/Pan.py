@@ -9,7 +9,6 @@ from lsaBGC.classes.BGC import BGC
 from lsaBGC import util
 import statistics
 import random
-import multiprocessing
 import math
 from operator import itemgetter
 from scipy import stats
@@ -436,7 +435,7 @@ class Pan:
 					try:
 						mean = statistics.mean(num_ogs)
 						stdev = statistics.stdev(num_ogs)
-					except:
+					except Exception as e:
 						pass
 					gcf_stats = ['GCF_' + str(gcf_identifier), len(gcf_mems), len(samp_counts.keys()), multi_same_sample,
 								 len(core_hgs),

@@ -94,7 +94,7 @@ def lsaBGC_ComprehenSeeIve():
     try:
         assert (os.path.isfile(orthofinder_matrix_file))
         assert (os.path.isfile(lsabgc_detailed_listing))
-    except:
+    except Exception as e:
         raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
 
     if os.path.isdir(outdir):

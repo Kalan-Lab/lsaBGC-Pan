@@ -101,7 +101,7 @@ def lsaBGC_Sociate():
     try:
         assert (os.path.isfile(orthofinder_matrix_file))
         assert (os.path.isfile(lsabgc_detailed_listing))
-    except:
+    except Exception as e:
         raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
 
     if os.path.isdir(outdir):
@@ -156,7 +156,7 @@ def lsaBGC_Sociate():
     try:
         util.runCmdViaSubprocess(axel_cmd_1, logObject=logObject, check_files=[cp_script])
         util.runCmdViaSubprocess(axel_cmd_2, logObject=logObject, check_files=[pd_script])
-    except:
+    except Exception as e:
         msg = 'Had issues downloading pyseer auxiliary scripts!'
         sys.stderr.write(msg + '\n')
         sys.stderr.write(traceback.format_exc() + '\n')
@@ -169,7 +169,7 @@ def lsaBGC_Sociate():
     phylo_dist_cmd = ['python', pd_script, '--lmm', species_tree, '>', kinship_matrix_file]          
     try:
         util.runCmdViaSubprocess(phylo_dist_cmd, logObject=logObject, check_files=[kinship_matrix_file])
-    except:
+    except Exception as e:
         msg = 'Issue generating kinship matrix from species phylogeny using the command: %s' % phylo_dist_cmd
         sys.stderr.write(msg + '\n')
         sys.stderr.write(traceback.format_exc() + '\n')
@@ -502,7 +502,7 @@ def lsaBGC_Sociate():
 
         try:
             assert(len(foc_gcf_samples) > 0)
-        except:
+        except Exception as e:
             msg = 'Issue finding samples with the GCF ' + hit[0] + ' - this should not happen!'
             sys.stderr.write(msg + '\n')
             logObject.error(msg)
@@ -600,7 +600,7 @@ def runPlotting(inputs):
 		
         rscript_cmd = ['Rscript', rscript_file]
         util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[pdf_file])
-    except:
+    except Exception as e:
         msg = 'Issues running creation of %s lsaBGC-Sociate phylo-heatmap plot for associated features: %s' % gcf_id
         sys.stderr.write(msg + '\n')
         logObject.error(msg)
