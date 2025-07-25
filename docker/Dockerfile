@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y git wget gcc && \
 # Set env variables and download minimal databases (MIBiG v3.1 + PGAP HMMs)
 ENV PATH /usr/src/lsaBGC_conda_env/bin:$PATH
 ENV ZOL_EXEC_PATH /usr/src/lsaBGC_conda_env/bin/
-ENV ZOL_DATA_PATH /usr/src/lsaBGC_conda_env/share/zol-1.4.12/db/
+ENV ZOL_DATA_PATH /usr/src/lsaBGC_conda_env/share/zol-1.6.3/db/
 RUN setup_annotation_dbs.py -ld && chmod 777 /home
 USER 1000:1000
 RUN mkdir /home/input /home/output
