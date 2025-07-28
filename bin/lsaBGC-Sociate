@@ -151,11 +151,11 @@ def lsaBGC_Sociate():
     
     cp_script = pyseer_script_dir + 'count_patterns.py'
     pd_script = pyseer_script_dir + 'phylogeny_distance.py'
-    axel_cmd_1 = ['axel', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/count_patterns.py', '-o', cp_script]
-    axel_cmd_2 = ['axel', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/phylogeny_distance.py', '-o', pd_script]
+    curl_cmd_1 = ['curl', '-L', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/count_patterns.py', '-o', cp_script]
+    curl_cmd_2 = ['curl', '-L', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/phylogeny_distance.py', '-o', pd_script]
     try:
-        util.runCmdViaSubprocess(axel_cmd_1, logObject=logObject, check_files=[cp_script])
-        util.runCmdViaSubprocess(axel_cmd_2, logObject=logObject, check_files=[pd_script])
+        util.runCmdViaSubprocess(curl_cmd_1, logObject=logObject, check_files=[cp_script])
+        util.runCmdViaSubprocess(curl_cmd_2, logObject=logObject, check_files=[pd_script])
     except Exception as e:
         msg = 'Had issues downloading pyseer auxiliary scripts!'
         sys.stderr.write(msg + '\n')
