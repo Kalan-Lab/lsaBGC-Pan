@@ -306,9 +306,9 @@ def lsaBGC():
 			sys.exit(1)
 	else:
 		gw_pkl = outdir + 'GECCO_PF_Weights.pkl'
-		axel_cmd = ['axel', 'https://github.com/Kalan-Lab/lsaBGC/raw/main/db/GECCO_PF_Weights.pkl', '-o', gw_pkl]
+		curl_cmd = ['curl', '-L', 'https://github.com/Kalan-Lab/lsaBGC/raw/main/db/GECCO_PF_Weights.pkl', '-o', gw_pkl]
 		try:
-			util.runCmdViaSubprocess(axel_cmd, logObject=logObject, check_files=[gw_pkl])
+			util.runCmdViaSubprocess(curl_cmd, logObject=logObject, check_files=[gw_pkl])
 		except Exception as e:
 			msg = 'Had issues downloading GECCO domain weights file!'
 			sys.stderr.write(msg + '\n')
