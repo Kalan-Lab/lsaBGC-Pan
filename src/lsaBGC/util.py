@@ -2036,7 +2036,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 		if not os.path.isdir(mibig_json_tar_dir):
 			if os.path.isfile(mibig_json_tar_file):
 				os.remove(mibig_json_tar_file)
-			wget_cmd = ['axel', mibig_json_tar_url, '-o', mibig_json_tar_file]
+			wget_cmd = ['curl', '-L', mibig_json_tar_url, '-o', mibig_json_tar_file]
 
 			try:
 				subprocess.call(' '.join(wget_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, executable='/bin/bash')
