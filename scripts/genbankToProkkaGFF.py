@@ -113,7 +113,7 @@ def reformatToProkkaGFF():
 			for rec in SeqIO.parse(oigf, 'genbank'):
 				outf.write('>' + rec.id + '\n' + str(rec.seq) + '\n')
 		outf.close()
-	except:
+	except Exception:
 		raise RuntimeError("Issue reformatting to a Prokka GFF file.")
 
 if __name__ == '__main__':
