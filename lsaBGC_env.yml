@@ -32,3 +32,9 @@ dependencies:
   - r-data.table
   - r-plyr
   - r-gridextra
+  - intbitset
+  - networkx
+  - gffutils
+  - edlib
+  - joblib
+  - cd-hit
