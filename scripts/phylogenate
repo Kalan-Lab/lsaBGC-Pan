@@ -121,17 +121,16 @@ def phylogenate():
 						genome = genomes[j]
 						genome_lt_to_og[genome][lts.strip()] = og
 
+	all_genomes = set(genomes)
+
+	msg = f'Found {len(select_ogs)} ortholog groups as (near-)single-copy core (found in {core_proportion*100.0} of genomes).\n'
+	sys.stdout.write(msg)
+	
 	subset_select_ogs = select_ogs
 	if len(select_ogs) > max_genes:
 		subset_select_ogs = set(random.sample(list(select_ogs), max_genes))
-
-	all_genomes = set(genomes)
-
-	msg = 'Found %d ortholog groups as (near-)single-copy core (found in %f%% of genomes).\n' % (len(select_ogs), (core_proportion*100.0))
-	sys.stdout.write(msg)
-	
-	msg = 'Selected %d random (near-)single-copy core orthogroups for phylogeny building.\n' % (max_genes)
-	sys.stdout.write(msg)
+		msg = f'Selected {max_genes} random (near-)single-copy core orthogroups for phylogeny building.\n'
+		sys.stdout.write(msg)
 
 	prot_dir = outdir + 'OG_FASTAs/'
 	msa_dir = outdir + 'OG_MSA_FASTAs/'

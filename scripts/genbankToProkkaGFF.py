@@ -76,7 +76,7 @@ def reformatToProkkaGFF():
 
 	try:
 		assert(util.is_genbank(input_genbank_file))
-	except Exception as e:
+	except:
 		raise RuntimeError('Issue with input Genbank file from NCBI.')
 
 	"""
@@ -97,20 +97,23 @@ def reformatToProkkaGFF():
 					start_coord = min([int(x) for x in str(feature.location)[1:].split(']')[0].split(':')]) + 1
 					end_coord = max([int(x) for x in str(feature.location)[1:].split(']')[0].split(':')])
 					direction = str(feature.location).split('(')[1].split(')')[0]
-					try:
-						locus_tag = feature.qualifiers.get('locus_tag')[0]
-					except Exception as e:
-						msg = f'Warning: no locus_tag for feature {feature.type} in GenBank file {input_genbank_file}. Skipping.'
-						sys.stderr.write(msg + '\n')
-					last_col = ';'.join(['ID=' + locus_tag, 'inference=ab initio prediction:p(y)rodigal', 'locus_tag=' + locus_tag, 'product=unannotated protein'])
-					outf.write('\t'.join([rec.id, 'p(y)rodigal', 'CDS', str(start_coord), str(end_coord), '.', direction, '0', last_col]) + '\n')
+					locus_tag = feature.qualifiers.get('locus_tag')[0]
+					
+					# Create gene feature first
+					gene_id = locus_tag + '_gene'
+					gene_attrs = ';'.join(['ID=' + gene_id, 'locus_tag=' + locus_tag])
+					outf.write('\t'.join([rec.id, 'p(y)rodigal', 'gene', str(start_coord), str(end_coord), '.', direction, '.', gene_attrs]) + '\n')
+					
+					# Create CDS feature with Parent reference to gene
+					cds_attrs = ';'.join(['ID=' + locus_tag, 'Parent=' + gene_id, 'inference=ab initio prediction:p(y)rodigal', 'locus_tag=' + locus_tag, 'product=unannotated protein'])
+					outf.write('\t'.join([rec.id, 'p(y)rodigal', 'CDS', str(start_coord), str(end_coord), '.', direction, '0', cds_attrs]) + '\n')
 
 		outf.write('##FASTA\n')
 		with open(input_genbank_file) as oigf:
 			for rec in SeqIO.parse(oigf, 'genbank'):
 				outf.write('>' + rec.id + '\n' + str(rec.seq) + '\n')
 		outf.close()
-	except Exception as e:
+	except:
 		raise RuntimeError("Issue reformatting to a Prokka GFF file.")
 
 if __name__ == '__main__':

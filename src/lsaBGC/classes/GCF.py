@@ -696,8 +696,8 @@ class GCF(Pan):
 
 			try:
 				with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-					futures = [executor.submit(create_codon_msas, arg) for arg in inputs]
-					for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Constructing codon alignments"):
+					submitted_jobs = [executor.submit(create_codon_msas, arg) for arg in inputs]
+					for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Constructing codon alignments"):
 						future.result()
 			except Exception as e:
 				msg = 'Issues with constructing codon alignments for homolog groups.'

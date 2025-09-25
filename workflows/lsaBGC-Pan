@@ -263,9 +263,15 @@ def lsaBGC():
 		sys.stderr.write(msg + '\n')
 
 	if os.path.isdir(outdir):
-		sys.stderr.write(
-			"Output directory already exists! Overwriting in 5 seconds, but only where needed, will use checkpoint files to skip certain steps...\n")
-		sleep(5)
+		try:
+			response = input("Output directory already exists! Would you like to continue and overwrite files where needed (will use checkpoint files to skip certain steps)? [y/n]: ")
+			if response.lower() not in ['y', 'yes']:
+				sys.stderr.write("Exiting.\n")
+				sys.exit(0)
+			sys.stderr.write("Continuing and overwriting where needed...\n")
+		except (EOFError, KeyboardInterrupt):
+			sys.stderr.write("\nNon-interactive session or user interrupt. Exiting.\n")
+			sys.exit(1)
 	else:
 		util.setupReadyDirectory([outdir])
 
@@ -430,8 +436,8 @@ is experimental and might cause issues.
 
 				try:
 					with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-						futures = [executor.submit(util.checkCDSHaveLocusTags, arg) for arg in lt_check_inputs]
-						for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Checking CDS locus tags"):
+						submitted_jobs = [executor.submit(util.checkCDSHaveLocusTags, arg) for arg in lt_check_inputs]
+						for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Checking CDS locus tags"):
 							future.result()
 				except Exception as e:
 					msg = 'Issues with assessing the validity and presence of locus tags in GenBank files.'
@@ -482,8 +488,8 @@ is experimental and might cause issues.
 					
 				try:
 					with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-						futures = [executor.submit(util.addLocusTagsToGBKs, arg) for arg in recreate_gbks_inputs]
-						for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Adding locus tags"):
+						submitted_jobs = [executor.submit(util.addLocusTagsToGBKs, arg) for arg in recreate_gbks_inputs]
+						for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Adding locus tags"):
 							future.result()
 				except Exception as e:
 					msg = 'Issues with recreating select GenBank files to make sure each CDS feature has locus tags.'
@@ -540,8 +546,8 @@ is experimental and might cause issues.
 					scaff_inf_inputs.append([sample, genome_gbk, sample_bgc_info_tuples])
 				try:
 					with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-						futures = [executor.submit(util.findAntiSMASHBGCInFullGenbank, arg) for arg in scaff_inf_inputs]
-						for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Finding antiSMASH BGC locations"):
+						submitted_jobs = [executor.submit(util.findAntiSMASHBGCInFullGenbank, arg) for arg in scaff_inf_inputs]
+						for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Finding antiSMASH BGC locations"):
 							future.result()
 				except Exception as e:
 					msg = 'Issues with parallel determination of the location of antiSMASH BGCs.'
@@ -566,8 +572,8 @@ is experimental and might cause issues.
 
 					try:
 						with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-							futures = [executor.submit(util.multiProcess, arg) for arg in gecco_cmds]
-							for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running GECCO"):
+							submitted_jobs = [executor.submit(util.multiProcess, arg) for arg in gecco_cmds]
+							for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Running GECCO"):
 								future.result()
 					except Exception as e:
 						msg = 'Issues with parallel running of GECCO commands.'
@@ -680,8 +686,8 @@ is experimental and might cause issues.
 
 			try:
 				with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-					futures = [executor.submit(util.multiProcess, arg) for arg in run_prodigal_cmds]
-					for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running Prodigal"):
+					submitted_jobs = [executor.submit(util.multiProcess, arg) for arg in run_prodigal_cmds]
+					for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Running Prodigal"):
 						future.result()
 			except Exception as e:
 				msg = 'Issues with running gene calling.'
@@ -702,8 +708,8 @@ is experimental and might cause issues.
 
 			try:
 				with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-					futures = [executor.submit(util.multiProcess, arg) for arg in gecco_cmds]
-					for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running GECCO"):
+					submitted_jobs = [executor.submit(util.multiProcess, arg) for arg in gecco_cmds]
+					for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Running GECCO"):
 						future.result()
 			except Exception as e:
 				msg = 'Issues with parallel running of GECCO commands.'
@@ -798,8 +804,8 @@ is experimental and might cause issues.
 
 			try:
 				with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-					futures = [executor.submit(util.extractProteinsFromGenBank, arg) for arg in extract_cds_inputs]
-					for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Extracting CDS proteins"):
+					submitted_jobs = [executor.submit(util.extractProteinsFromGenBank, arg) for arg in extract_cds_inputs]
+					for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Extracting CDS proteins"):
 						future.result()
 			except Exception as e:
 				msg = 'Issues with parallel extraction of CDS proteins into FASTA files from GenBank files.'

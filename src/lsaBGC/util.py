@@ -164,8 +164,8 @@ def runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matr
 			lsabgc_map_cmds.append(lsabgc_map_cmd)
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-				futures = [executor.submit(multiProcess, arg) for arg in lsabgc_map_cmds]
-				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running lsaBGC-MIBiGMapper"):
+				submitted_jobs = [executor.submit(multiProcess, arg) for arg in lsabgc_map_cmds]
+				for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Running lsaBGC-MIBiGMapper"):
 					future.result()
 		except Exception as e:
 			msg = 'Issues with parallel running lsaBGC-MIBiGMapper commands.'
@@ -222,8 +222,8 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 		os.environ["OMP_NUM_THREADS"] = "1"
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-				futures = [executor.submit(multiProcess, arg) for arg in lsabgc_see_and_csi_cmds]
-				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running lsaBGC-See and lsaBGC-ComprehenSeeIve"):
+				submitted_jobs = [executor.submit(multiProcess, arg) for arg in lsabgc_see_and_csi_cmds]
+				for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Running lsaBGC-See and lsaBGC-ComprehenSeeIve"):
 					future.result()
 		except Exception as e:
 			msg = 'Issues with parallel running of lsaBGC-See and lsaBGC-ComprehenSeeIve commands.'
@@ -367,8 +367,8 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-				futures = [executor.submit(computeConservationOfOGWithinGCFContext, arg) for arg in complete_conservation_inputs]
-				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Computing conservation of orthogroups"):
+				submitted_jobs = [executor.submit(computeConservationOfOGWithinGCFContext, arg) for arg in complete_conservation_inputs]
+				for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Computing conservation of orthogroups"):
 					future.result()
 		except Exception as e:
 			msg = 'Issues with parallel computing of orthogroup conservations across complete instances.'
@@ -380,8 +380,8 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-				futures = [executor.submit(multiProcess, arg) for arg in zol_cmds]
-				for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running zol"):
+				submitted_jobs = [executor.submit(multiProcess, arg) for arg in zol_cmds]
+				for _ in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Running zol"):
 					pass
 		except Exception as e:
 			msg = 'Issues with parallel running of zol commands.'
@@ -393,8 +393,8 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-				futures = [executor.submit(multiProcess, arg) for arg in cgc_cmds]
-				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Running cgc"):
+				submitted_jobs = [executor.submit(multiProcess, arg) for arg in cgc_cmds]
+				for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Running cgc"):
 					future.result()
 		except Exception as e:
 			msg = 'Issues with parallel running of cgc commands.'
@@ -807,8 +807,15 @@ def multiProcessNoLog(input_cmd):
 	- input_cmd: A list corresponding to an input command.
 	"""
 	try:
-		subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-						executable='/bin/bash')
+		# Check if command contains output redirection
+		cmd_str = ' '.join(input_cmd)
+		if '>' in cmd_str:
+			# Use shell=True to handle redirection properly
+			subprocess.call(cmd_str, shell=True, executable='/bin/bash')
+		else:
+			# For commands without redirection, use the original method
+			subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+							executable='/bin/bash')
 	except Exception as e:
 		sys.stderr.write(traceback.format_exc())
 
@@ -1497,8 +1504,8 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-				futures = [executor.submit(multiProcess, arg) for arg in reformat_cmds]
-				for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Creating Prokka-like GFF files for Panaroo"):
+				submitted_jobs = [executor.submit(multiProcess, arg) for arg in reformat_cmds]
+				for future in tqdm(concurrent.futures.as_completed(submitted_jobs), total=len(submitted_jobs), desc="Creating Prokka-like GFF files for Panaroo"):
 					future.result()
 		except Exception as e:
 			msg = 'Issues creating Prokka-like GFF files for Panaroo.'
@@ -1840,6 +1847,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 							     mibig_dir, recon_result_file, recon_og_result_file, recon_pop_color_file,
 								 sociate_result_file, final_spreadsheet_xlsx, scratch_dir, logObject):
 	"""
+	********************************************************************************************************************
 	Definition:
 	Void, major function to create the final consolidated spreadsheet that is the major result of lsaBGC-Pan.
 	********************************************************************************************************************
@@ -1892,25 +1900,58 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 
 		zol_combined_tsv_file = scratch_dir + 'zol_results.tsv'
 
-		zol_sheet_header = ['GCF ID', 'Ortholog Group (OG) ID', 'OG is Single Copy?', 'Proportion of Total Gene Cluster Instances with OG', 
-					        'Proprtion of Complete Gene Cluster Instances with OG', 'OG Median Length (bp)', 'OG Consensus Order', 
-							'OG Consensus Direction', 'Tajima\'s D', 'Proportion of Filtered Codon Alignment is Segregating Sites', 
-							'Entropy', 'Upstream Region Entropy', 'Median Beta-RD-gc', 'Max Beta-RD-gc', 
-							'Proportion of sites which are highly ambiguous in codon alignment', 
-							'Proportion of sites which are highly ambiguous in trimmed codon alignment', 'Median GC', 'Median GC Skew',
-							'BGC score (GECCO weights)', 'Viral score (V-Score)']
-		
+		zol_sheet_header = [
+			'GCF ID',
+			'Ortholog Group (OG) ID',
+			'OG is Single Copy?',
+			'Proportion of Total Gene Clusters with OG',
+			'Proportion of Complete Gene Cluster Instances with OG',
+			'OG Median Length (bp)',
+			'OG Consensus Order',
+			'OG Consensus Direction',
+			'PGAP Annotation (E-value)',
+			'Pfam Domains',
+			'Tajima\'s D',
+			'Proportion of Filtered Codon Alignment is Segregating Sites',
+			'Entropy',
+			'Upstream Region Entropy',
+			'Median Beta-RD-gc',
+			'Max Beta-RD-gc',
+			'Proportion of sites which are highly ambiguous in codon alignment',
+			'Proportion of sites which are highly ambiguous in trimmed codon alignment',
+			'Median GC',
+			'Median GC Skew',
+			'BGC score (GECCO weights)',
+			'Viral score (V-Score)',
+			'Hydrophobicity Mean',
+			'Hydrophobicity Std Dev',
+			'Aliphatic Index Mean',
+			'Aliphatic Index Std Dev',
+			'm/z Mean',
+			'm/z Std Dev',
+			'KO Annotation (E-value)',
+			'PaperBLAST Annotation (E-value)',
+			'CARD Annotation (E-value)',
+			'IS Finder (E-value)',
+			'MIBiG Annotation (E-value)',
+			'VOG Annotation (E-value)',
+			'VFDB Annotation (E-value)'
+		]
+
+		# Optional HyPhy fields when zol is run with HyPhy
 		if zol_high_qual_flag:
-			zol_sheet_header += ['GARD Partitions Based on Recombination Breakpoints',
-			           'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
-				       'Average delta(Beta, Alpha) by FUBAR across sites',
-				       'Proportion of Sites Under Selection which are Positive', 'P-value for gene-wide episodic selection by BUSTED'] 
-					
-		zol_sheet_header += ['KO Annotation (E-value)', 'PGAP Annotation (E-value)', 'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)',
-							'IS Finder (E-value)', 'MIBiG Annotation (E-value)', 'VOG Annotation (E-value)', 'VFDB Annotation (E-value)', 
-							'Pfam Domains', 'CDS Locus Tags', 'OG Consensus Sequence']
-		
-		# ^ basically added two columns (GCF id and complete instances conservation) and took away one (custom db annotation)
+			zol_sheet_header += [
+				'GARD Partitions Based on Recombination Breakpoints',
+				'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
+				'Average delta(Beta, Alpha) by FUBAR across sites',
+				'Proportion of Sites Under Selection which are Positive',
+				'P-value for gene-wide episodic selection by BUSTED'
+			]
+
+		zol_sheet_header += [
+			'CDS Locus Tags',
+			'OG Consensus Sequence'
+		]
 
 		zol_full_dir = zol_results_dir + 'Comprehensive/'
 		gcf_comp_cons_dir = zol_results_dir + 'Complete_Instances/'	
@@ -1932,101 +1973,163 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 		zctf_handle = open(zol_combined_tsv_file, 'w')
 		zctf_handle.write('\t'.join(zol_sheet_header) + '\n')
 		num_rows = 1
+		# Dynamically parse zol headers and rows to avoid hard-coded indices
+		zol_header_from_report = None
 		for gcf in os.listdir(zol_full_dir):
 			gcf_result_file = zol_full_dir + gcf + '/Final_Results/Consolidated_Report.tsv'
-			if not os.path.isfile(gcf_result_file): continue
+			if not os.path.isfile(gcf_result_file):
+				continue
 			with open(gcf_result_file) as ogrf:
 				for i, line in enumerate(ogrf):
-					if i == 0: continue
-					line = line.strip()
+					line = line.strip('\n')
+					if i == 0:
+						zol_header_from_report = line.split('\t')
+						continue
 					ls = line.split('\t')
-					row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:18] + ls[19:]
-					if zol_high_qual_flag:
-						row = [gcf, ls[0], ls[1], ls[2], comp_cons[gcf][ls[0]]] + ls[3:23] + ls[24:]
-					zctf_handle.write('\t'.join(row) + '\n')
+					col_to_val = {}
+					for ci, cv in enumerate(ls):
+						if zol_header_from_report is not None and ci < len(zol_header_from_report):
+							col_to_val[zol_header_from_report[ci]] = cv
+
+					og_id = col_to_val.get('Ortholog Group (OG) ID', 'NA')
+					row_vals = []
+					for h in zol_sheet_header:
+						if h == 'GCF ID':
+							row_vals.append(gcf)
+						elif h == 'Ortholog Group (OG) ID':
+							row_vals.append(og_id)
+						elif h == 'Proportion of Complete Gene Cluster Instances with OG':
+							row_vals.append(comp_cons[gcf][og_id])
+						else:
+							row_vals.append(col_to_val.get(h, 'NA'))
+					zctf_handle.write('\t'.join([str(x) for x in row_vals]) + '\n')
 					num_rows += 1
 		zctf_handle.close()
 
-		zr_numeric_columns = set(['Proportion of Total Gene Cluster Instances with OG', 'Proprtion of Complete Gene Cluster Instances with OG', 
-							      'OG Median Length (bp)', 'OG Consensus Order', 'Tajima\'s D', 'GARD Partitions Based on Recombination Breakpoints',
-			           			  'Number of Sites Identified as Under Positive or Negative Selection by FUBAR', 'Average delta(Beta, Alpha) by FUBAR across sites',
-				     		      'Proportion of Sites Under Selection which are Positive', 'Proportion of Filtered Codon Alignment is Segregating Sites',
-								  'Entropy', 'Upstream Region Entropy', 'Median Beta-RD-gc', 'Max Beta-RD-gc', 'Proportion of sites which are highly ambiguous in codon alignment', 
-								  'Proportion of sites which are highly ambiguous in trimmed codon alignment', 'Median GC', 'Median GC Skew', 
-								  'BGC score (GECCO weights)', 'Viral score (V-Score)'])
+		zr_numeric_columns = set([
+			'Proportion of Total Gene Clusters with OG',
+			'Proportion of Complete Gene Cluster Instances with OG',
+			'OG Median Length (bp)',
+			'OG Consensus Order',
+			'Tajima\'s D',
+			'GARD Partitions Based on Recombination Breakpoints',
+			'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
+			'Average delta(Beta, Alpha) by FUBAR across sites',
+			'Proportion of Sites Under Selection which are Positive',
+			'Proportion of Filtered Codon Alignment is Segregating Sites',
+			'Entropy',
+			'Upstream Region Entropy',
+			'Median Beta-RD-gc',
+			'Max Beta-RD-gc',
+			'Proportion of sites which are highly ambiguous in codon alignment',
+			'Proportion of sites which are highly ambiguous in trimmed codon alignment',
+			'Median GC',
+			'Median GC Skew',
+			'BGC score (GECCO weights)',
+			'Viral score (V-Score)',
+			'Hydrophobicity Mean',
+			'Hydrophobicity Std Dev',
+			'Aliphatic Index Mean',
+			'Aliphatic Index Std Dev',
+			'm/z Mean',
+			'm/z Std Dev'
+		])
 		
 		zr_data = loadTableInPandaDataFrame(zol_combined_tsv_file, zr_numeric_columns)
 		zr_data.to_excel(writer, sheet_name='zol Results', index=False, na_rep="NA")
 		zr_sheet =  writer.sheets['zol Results']
 
+		# Apply borders to all cells similar to zol styling
+		border_format = workbook.add_format({'border': 1, 'border_color': '#DCDCDC'})
+		zr_sheet.set_column(0, len(zr_data.columns) - 1, None, border_format)
+
+		# Header/NA/Warning formatting
 		zr_sheet.conditional_format('C2:C' + str(num_rows), {'type': 'cell', 'criteria': '==', 'value': '"False"', 'format': warn_format})
 		zr_sheet.conditional_format('A2:CA' + str(num_rows), {'type': 'cell', 'criteria': '==', 'value': '"NA"', 'format': na_format})
 		zr_sheet.conditional_format('A1:CA1', {'type': 'cell', 'criteria': '!=', 'value': 'NA', 'format': header_format})
 
-		# prop gene-clusters with hg
-		zr_sheet.conditional_format('D2:D' + str(num_rows), {'type': '2_color_scale', 'min_color': "#f7de99", 'max_color': "#c29006", "min_value": 0.0, "max_value": 1.0, 'min_type': 'num', 'max_type': 'num'})
-		zr_sheet.conditional_format('E2:E' + str(num_rows), {'type': '2_color_scale', 'min_color': "#f7de99", 'max_color': "#c29006", "min_value": 0.0, "max_value": 1.0, 'min_type': 'num', 'max_type': 'num'})
+		# Build dynamic column letter map based on current dataframe columns
+		def _excel_col_letters(n):
+			cols = []
+			for i in range(n):
+				div, mod = divmod(i, 26)
+				letter = chr(65 + mod)
+				while div:
+					div, mod = divmod(div - 1, 26)
+					letter = chr(65 + mod) + letter
+				cols.append(letter)
+			return cols
 
-		# gene-lengths
-		zr_sheet.conditional_format('F2:F' + str(num_rows), {'type': '2_color_scale', 'min_color': "#a3dee3", 'max_color': "#1ebcc9", "min_value": 100, "max_value": 2500, 'min_type': 'num', 'max_type': 'num'})
+		excel_cols = _excel_col_letters(len(zr_data.columns))
+		col_map = {col: excel_cols[i] for i, col in enumerate(list(zr_data.columns))}
+
+		# Helper to conditionally apply formatting if column exists
+		def _fmt_if(col_name, fmt_dict):
+			if col_name in col_map:
+				cell_range = f"{col_map[col_name]}2:{col_map[col_name]}{num_rows}"
+				zr_sheet.conditional_format(cell_range, fmt_dict)
+
+		# Apply coloring similar to zol v1.6.9 using dynamic mapping
+		_fmt_if('Proportion of Total Gene Clusters with OG', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#CCCCCC", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
+		_fmt_if('Proportion of Complete Gene Cluster Instances with OG', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#CCCCCC", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
+		_fmt_if('OG Median Length (bp)', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#5A8AC6", "min_value": 100, "max_value": 2500, "min_type": "num", "max_type": "num"})
+
+		_fmt_if('Tajima\'s D', {"type": "3_color_scale", "min_color": "#E6B0AA", "mid_color": "#FFFFFF", "max_color": "#B8CCE4", "min_value": -2.0, "mid_value": 0.0, "max_value": 2.0, "min_type": "num", "mid_type": "num", "max_type": "num"})
+		_fmt_if('Proportion of Filtered Codon Alignment is Segregating Sites', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#A37BA8", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
+		_fmt_if('Entropy', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#F86B6B", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
+		_fmt_if('Upstream Region Entropy', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#F86B6B", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
+
+		# Beta-RD: apply across both columns if both present, else individually
+		if 'Median Beta-RD-gc' in col_map and 'Max Beta-RD-gc' in col_map:
+			cell_range = f"{col_map['Median Beta-RD-gc']}2:{col_map['Max Beta-RD-gc']}{num_rows}"
+			zr_sheet.conditional_format(cell_range, {"type": "3_color_scale", "min_color": "#F8696B", "mid_color": "#FFEB84", "max_color": "#63BE7B", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25, "min_type": "num", "mid_type": "num", "max_type": "num"})
+		else:
+			_fmt_if('Median Beta-RD-gc', {"type": "3_color_scale", "min_color": "#F8696B", "mid_color": "#FFEB84", "max_color": "#63BE7B", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25, "min_type": "num", "mid_type": "num", "max_type": "num"})
+			_fmt_if('Max Beta-RD-gc', {"type": "3_color_scale", "min_color": "#F8696B", "mid_color": "#FFEB84", "max_color": "#63BE7B", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25, "min_type": "num", "mid_type": "num", "max_type": "num"})
+
+		# HyPhy (zol high-quality preset) columns coloring to match zol v1.6.9
+		if 'GARD Partitions Based on Recombination Breakpoints' in col_map:
+			cell_range = f"{col_map['GARD Partitions Based on Recombination Breakpoints']}2:{col_map['GARD Partitions Based on Recombination Breakpoints']}{num_rows}"
+			zr_sheet.conditional_format(cell_range, {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#F8696B", "min_value": 1, "max_value": 5, "min_type": "num", "max_type": "num"})
+		if 'Number of Sites Identified as Under Positive or Negative Selection by FUBAR' in col_map:
+			cell_range = f"{col_map['Number of Sites Identified as Under Positive or Negative Selection by FUBAR']}2:{col_map['Number of Sites Identified as Under Positive or Negative Selection by FUBAR']}{num_rows}"
+			zr_sheet.conditional_format(cell_range, {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#B8D4B8", "min_value": 0, "max_value": 10, "min_type": "num", "max_type": "num"})
+		if 'Average delta(Beta, Alpha) by FUBAR across sites' in col_map:
+			cell_range = f"{col_map['Average delta(Beta, Alpha) by FUBAR across sites']}2:{col_map['Average delta(Beta, Alpha) by FUBAR across sites']}{num_rows}"
+			zr_sheet.conditional_format(cell_range, {"type": "3_color_scale", "min_color": "#E6B0AA", "mid_color": "#FFFFFF", "max_color": "#B8D4B8", "min_value": -5, "mid_value": 0, "max_value": 5, "min_type": "num", "mid_type": "num", "max_type": "num"})
+		if 'Proportion of Sites Under Selection which are Positive' in col_map:
+			cell_range = f"{col_map['Proportion of Sites Under Selection which are Positive']}2:{col_map['Proportion of Sites Under Selection which are Positive']}{num_rows}"
+			zr_sheet.conditional_format(cell_range, {"type": "3_color_scale", "min_color": "#E6B0AA", "mid_color": "#FFFFFF", "max_color": "#B8D4B8", "min_value": 0, "mid_value": 0.5, "max_value": 1, "min_type": "num", "mid_type": "num", "max_type": "num"})
+		if 'P-value for gene-wide episodic selection by BUSTED' in col_map:
+			cell_range = f"{col_map['P-value for gene-wide episodic selection by BUSTED']}2:{col_map['P-value for gene-wide episodic selection by BUSTED']}{num_rows}"
+			zr_sheet.conditional_format(cell_range, {"type": "2_color_scale", "min_color": "#63BE7B", "max_color": "#FFFFFF", "min_value": 0, "max_value": 0.05, "min_type": "num", "max_type": "num"})
+
+		_fmt_if('Proportion of sites which are highly ambiguous in codon alignment', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#E6B0AA", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
+		_fmt_if('Proportion of sites which are highly ambiguous in trimmed codon alignment', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#E6B0AA", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
+		_fmt_if('Median GC', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#63BE7B", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
+		# Median GC Skew: 3-color scale centered at 0
+		if 'Median GC Skew' in col_map:
+			cell_range = f"{col_map['Median GC Skew']}2:{col_map['Median GC Skew']}{num_rows}"
+			zr_sheet.conditional_format(cell_range, {"type": "3_color_scale", "min_color": "#E8D5D5", "mid_color": "#FFFFFF", "max_color": "#D5E8F5", "min_value": -0.2, "mid_value": 0.0, "max_value": 0.2, "min_type": "num", "mid_type": "num", "max_type": "num"})
+		# BGC score (GECCO weights): highlight > 2
+		gecco_format = workbook.add_format({"bg_color": "#d5abde", "border": 1, "border_color": "#DCDCDC"})
+		if 'BGC score (GECCO weights)' in col_map:
+			cell_range = f"{col_map['BGC score (GECCO weights)']}2:{col_map['BGC score (GECCO weights)']}{num_rows}"
+			zr_sheet.conditional_format(cell_range, {"type": "cell", "criteria": ">", "value": 2, "format": gecco_format})
+		# Viral score
+		_fmt_if('Viral score (V-Score)', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#E6B0AA", "min_value": 0, "max_value": 4, "min_type": "num", "max_type": "num"})
 		
-		# taj-d
-		zr_sheet.conditional_format('I2:I' + str(num_rows),
-										{'type': '3_color_scale', 'min_color': "#f7a09c", "mid_color": "#e0e0e0",'min_type': 'num', 'max_type': 'num', 'mid_type': 'num',
-										'max_color': "#87cefa", "min_value": -2.0, "mid_value": 0.0, "max_value": 2.0})
+		_fmt_if('Hydrophobicity Mean', {"type": "3_color_scale", "min_color": "#5A8AC6", "mid_color": "#FFFFFF", "max_color": "#F8696B", "min_value": -2.5, "mid_value": 0, "max_value": 2.5, "min_type": "num", "mid_type": "num", "max_type": "num"})
+		_fmt_if('Hydrophobicity Std Dev', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#F8696B", "min_value": 0, "max_value": 2, "min_type": "num", "max_type": "num"})
+		_fmt_if('Aliphatic Index Mean', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#63BE7B", "min_value": 50, "max_value": 150, "min_type": "num", "max_type": "num"})
+		_fmt_if('Aliphatic Index Std Dev', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#F8696B", "min_value": 0, "max_value": 30, "min_type": "num", "max_type": "num"})
+		_fmt_if('m/z Mean', {"type": "2_color_scale", "min_color": "#dcedde", "max_color": "#87bba2", "min_value": 5000, "max_value": 75000, "min_type": "num", "max_type": "num"})
+		_fmt_if('m/z Std Dev', {"type": "2_color_scale", "min_color": "#dcedde", "max_color": "#87bba2", "min_value": 0, "max_value": 5000, "min_type": "num", "max_type": "num"})
 
-		# prop seg sites
-		zr_sheet.conditional_format('J2:J' + str(num_rows),
-										{'type': '2_color_scale', 'min_color': "#eab3f2", 'min_type': 'num', 'max_type': 'num',
-										'max_color': "#a37ba8", "min_value": 0.0, "max_value": 1.0})
-
-		# entropy
-		zr_sheet.conditional_format('K2:K' + str(num_rows),
-										{'type': '2_color_scale', 'min_color': "#f7a8bc", 'min_type': 'num', 'max_type': 'num',
-										'max_color': "#fa6188", "min_value": 0.0, "max_value": 1.0})
-
-		# upstream region entropy
-		zr_sheet.conditional_format('L2:L' + str(num_rows),
-										{'type': '2_color_scale', 'min_color': "#f7a8bc", 'min_type': 'num', 'max_type': 'num',
-										'max_color': "#fa6188", "min_value": 0.0, "max_value": 1.0})
-
-		# median beta-rd gc
-		zr_sheet.conditional_format('M2:M' + str(num_rows),
-										{'type': '3_color_scale', 'min_color': "#fac087", "mid_color": "#e0e0e0",'min_type': 'num', 'max_type': 'num', 'mid_type': 'num',
-										'max_color': "#9eb888", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25})
-		# max beta-rd gc
-		zr_sheet.conditional_format('N2:N' + str(num_rows),
-										{'type': '3_color_scale', 'min_color': "#fac087", "mid_color": "#e0e0e0",'min_type': 'num', 'max_type': 'num', 'mid_type': 'num',
-										'max_color': "#9eb888", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25})
-
-		# ambiguity full ca
-		zr_sheet.conditional_format('O2:O' + str(num_rows),
-										{'type': '2_color_scale', 'min_color': "#ed8c8c", 'min_type': 'num', 'max_type': 'num',
-										'max_color': "#ab1616", "min_value": 0.0, "max_value": 1.0})
-
-		# ambiguity trim ca
-		zr_sheet.conditional_format('P2:P' + str(num_rows),
-										{'type': '2_color_scale', 'min_color': "#ed8c8c", 'min_type': 'num', 'max_type': 'num',
-										'max_color': "#ab1616", "min_value": 0.0, "max_value": 1.0})
-
-		# GC
-		zr_sheet.conditional_format('Q2:Q' + str(num_rows),
-										{'type': '2_color_scale', 'min_color': "#abffb7", 'min_type': 'num', 'max_type': 'num',
-										'max_color': "#43bf55", "min_value": 0.0, "max_value": 1.0})
-
-		# GC Skew
-		zr_sheet.conditional_format('R2:R' + str(num_rows),
-										{'type': '2_color_scale', 'min_color': "#c7afb4", 'min_type': 'num', 'max_type': 'num',
-										'max_color': "#965663", "min_value": -2.0, "max_value": 2.0})
-
-		# BGC score 
-		zr_sheet.conditional_format('S2:S' + str(num_rows), {'type': '2_color_scale', 'min_color': "#f5aca4", 'min_type': 'num', 'max_type': 'num',
-									'max_color': "#c75246", "min_value": -7.0, "max_value": 13.0})
-		
-		# V-Score
-		zr_sheet.conditional_format('T2:T' + str(num_rows), {'type': '2_color_scale', 'min_color': "#dfccff", 'min_type': 'num', 'max_type': 'num',
-									'max_color': "#715a96", "min_value": 0.0, "max_value": 10.0})
-
+		# Add autofilter across header row and default filter for Proportion >= 0.1 if present
+		zr_sheet.autofilter(f"A1:{excel_cols[len(zr_data.columns) - 1]}{num_rows}")
+		if 'Proportion of Total Gene Clusters with OG' in col_map:
+			zr_sheet.filter_column(col_map['Proportion of Total Gene Clusters with OG'], "x >= 0.1")
 
 		# create MIBiG mapping spreadsheet
 		mibig_json_tar_url = 'https://dl.secondarymetabolites.org/mibig/mibig_json_4.0.tar.gz'
@@ -2138,10 +2241,10 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 		so_sheet =  writer.sheets['lsaBGC-Sociate Results']
 		so_sheet.conditional_format('A1:CA1', {'type': 'cell', 'criteria': '!=', 'value': 'NA', 'format': header_format})
 
-		# close workbook 
-		workbook.close()
+		writer.close()
+		
 	except Exception as e:
-		msg = 'Difficulties creating final multi-sheet spreadsheet XLSX file!'
-		logObject.error(msg)
-		sys.stderr.write(msg +  '\n')
-		sys.stderr.write(traceback.format_exc() + '\n')
+		logObject.error("Issues creating consolidated results files.")
+		logObject.error(e)
+		logObject.error(traceback.format_exc())
+		sys.exit(1)

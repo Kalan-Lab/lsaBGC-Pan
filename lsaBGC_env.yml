@@ -7,10 +7,10 @@ dependencies:
   - r-base
   - setuptools
   - pip
-  - zol>=1.5.12
+  - zol>=1.6.9
+  - panaroo>=1.5.2
   - muscle=5.1
   - orthofinder=2.5.5
-  - panaroo
   - pyseer>=1.3
   - gecco=0.9.6
   - prodigal
