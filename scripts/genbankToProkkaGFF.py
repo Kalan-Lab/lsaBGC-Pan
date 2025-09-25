@@ -76,7 +76,7 @@ def reformatToProkkaGFF():
 
 	try:
 		assert(util.is_genbank(input_genbank_file))
-	except:
+	except Exception:
 		raise RuntimeError('Issue with input Genbank file from NCBI.')
 
 	"""
