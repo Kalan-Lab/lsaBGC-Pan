@@ -824,7 +824,7 @@ class GCF(Pan):
 			raise RuntimeError(traceback.format_exc())
 
 		# use FastTree2 to construct phylogeny
-		fasttree_cmd = ['fasttree', '-nt', output_alignment, '>', output_phylogeny]
+		fasttree_cmd = ['FastTree', '-nt', output_alignment, '>', output_phylogeny]
 		if self.logObject:
 			self.logObject.info('Running FastTree2 with the following command: %s' % ' '.join(fasttree_cmd))
 		try:

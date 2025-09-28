@@ -49,6 +49,7 @@ from lsaBGC import util
 import concurrent.futures
 import warnings
 import shutil
+import subprocess
 from tqdm import tqdm
 from rich_argparse import RawTextRichHelpFormatter
 from argparse import ArgumentParser
@@ -321,6 +322,55 @@ def lsaBGC():
 			sys.stderr.write(traceback.format_exc())
 			sys.exit(1)
 		os.environ["GECCO_DOMAIN_WEIGHTS_PKL_FILE"] = gw_pkl
+
+	if use_panaroo_flag:
+		if shutil.which('panaroo') is None:
+			sys.stderr.write("""
+[ERROR] Panaroo requested but not installed! 
+
+> Please try the following:
+$ conda install edlib
+
+> NOTE: If on a mac, you might need to specify the subdirectory as such:
+$ CONDA_SUBDIR=osx-64 conda install -c conda-forge -c bioconda edlib
+
+Then, install panaroo as such:
+$ pip3 install git+https://github.com/gtonkinhill/panaroo
+
+Finally, please try running lsaBGC-Pan again!
+""")
+			sys.exit(1)
+	else:
+		try:
+			of_test_out = subprocess.check_output(['orthofinder', '-h'], stderr=subprocess.STDOUT)
+			if 'error' in of_test_out.decode('utf-8').lower():
+				sys.stderr.write("""
+[ERROR] OrthoFinder was not installed (properly) or set up correctly! 
+
+> Set the bin/ folder in your conda environment to be have the highest priority for path lookup:
+$ export PATH=$CONDA_PREFIX/bin:$PATH
+
+> Then, test if you are able to see the help message for OrthoFinder without errors:
+$ orthofinder -h
+
+Finally, please try running lsaBGC-Pan again!
+""")
+				
+				sys.exit(1)
+		except Exception as e:
+			sys.stderr.write("""
+[ERROR] OrthoFinder was not installed (properly) or set up correctly! 
+
+> Set the bin/ folder in your conda environment to be have the highest priority for path lookup:
+$ export PATH=$CONDA_PREFIX/bin:$PATH
+
+> Then, test if you are able to see the help message for OrthoFinder without errors:
+$ orthofinder -h
+
+Finally, please try running lsaBGC-Pan again!
+""")
+			sys.exit(1)
+
 
 	parallel_jobs_4thread = max(math.floor(threads / 4), 1)
 	multi_thread = 4

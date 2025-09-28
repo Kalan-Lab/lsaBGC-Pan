@@ -222,7 +222,7 @@ def phylogenate():
 		util.runCmdViaSubprocess(iqtree_cmd, check_files=[tree_file])
 	else:
 		tree_file = outdir + 'Species_Phylogeny_FastTree2.treefile'
-		fasttree_cmd = ['fasttree', concat_msa_file, '>', tree_file]
+		fasttree_cmd = ['FastTree', concat_msa_file, '>', tree_file]
 		util.runCmdViaSubprocess(fasttree_cmd, check_files=[tree_file])
 
 	# done!
