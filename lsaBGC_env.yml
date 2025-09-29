@@ -20,7 +20,7 @@ dependencies:
   - pandas
   - xlsxwriter>=3.0.3
   - scikit-learn>=1.2.2
-  - numpy >2.0.0; <=2.2.6
+  - numpy >2.0.0, <=2.2.6
   - r-ggplot2
   - r-cowplot
   - r-phytools
