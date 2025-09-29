@@ -329,7 +329,7 @@ def lsaBGC():
 [ERROR] Panaroo requested but not installed! 
 
 > Please try the following:
-$ conda install edlib
+$ conda install -c conda-forge -c bioconda edlib
 
 > NOTE: If on a mac, you might need to specify the subdirectory as such:
 $ CONDA_SUBDIR=osx-64 conda install -c conda-forge -c bioconda edlib
