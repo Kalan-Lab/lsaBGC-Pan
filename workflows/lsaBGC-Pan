@@ -328,16 +328,10 @@ def lsaBGC():
 			sys.stderr.write("""
 [ERROR] Panaroo requested but not installed! 
 
-> Please try the following:
-$ conda install -c conda-forge -c bioconda edlib
-
-> NOTE: If on a mac, you might need to specify the subdirectory as such:
-$ CONDA_SUBDIR=osx-64 conda install -c conda-forge -c bioconda edlib
-
-Then, install panaroo as such:
+> Please try running the following:
 $ pip3 install git+https://github.com/gtonkinhill/panaroo
 
-Finally, please try running lsaBGC-Pan again!
+Then, please try re-running lsaBGC-Pan again!
 """)
 			sys.exit(1)
 	else:
@@ -353,7 +347,7 @@ $ export PATH=$CONDA_PREFIX/bin:$PATH
 > Then, test if you are able to see the help message for OrthoFinder without errors:
 $ orthofinder -h
 
-Finally, please try running lsaBGC-Pan again!
+Finally, please try re-running lsaBGC-Pan again!
 """)
 				
 				sys.exit(1)
@@ -367,7 +361,7 @@ $ export PATH=$CONDA_PREFIX/bin:$PATH
 > Then, test if you are able to see the help message for OrthoFinder without errors:
 $ orthofinder -h
 
-Finally, please try running lsaBGC-Pan again!
+Finally, please try re-running lsaBGC-Pan again!
 """)
 			sys.exit(1)
 
