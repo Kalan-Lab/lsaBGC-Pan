@@ -1047,8 +1047,9 @@ def findAntiSMASHBGCInFullGenbank(inputs):
 
 			outf_handle = open(outf, 'w')
 			for start_coord in bgc_starts:
-				end_coord = start_coord + bgc_length - 1
-				outf_handle.write(bgc_scaffold + '\t' + str(start_coord) + '\t' + str(end_coord) + '\t' + str(min([start_coord, full_scaff_length-end_coord])) + '\n')
+				start_coord += 1
+				end_coord = start_coord + bgc_length - 1 
+				outf_handle.write(bgc_scaffold + '\t' + str(start_coord) + '\t' + str(end_coord) + '\t' + str(min([start_coord-1, full_scaff_length-end_coord])) + '\n')
 			outf_handle.close()
 			
 	except Exception as e:

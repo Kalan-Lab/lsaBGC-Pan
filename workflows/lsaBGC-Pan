@@ -90,6 +90,10 @@ def create_parser():
     * Specifying fungal mode makes sure OrthoFinder is being used and that antiSMASH results were provided. 
       GECCO is not designed for fungal genomes. In addition, customized processing designed for bacterial 
       genomics is not performed and a more direct extraction of hierarchical orthogroups is applied.
+	* The name of the sample-specific antiSMASH results directory will be used as the sample name, not the 
+	  name of the full-genome GenBank file within it. So the sample name will be controlled by the antiSMASH 
+	  argument --output-dir and not --output-basename.
+
     **********************************************************************************************************
     OVERVIEW OF WORKFLOW STEPS:	
 	
