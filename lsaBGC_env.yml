@@ -9,6 +9,7 @@ dependencies:
   - pip
   - zol>=1.6.9
   - panaroo>=1.5.2
+  - bofasa
   - muscle=5.1
   - orthofinder=2.5.5
   - pyseer>=1.3

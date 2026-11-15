@@ -70,7 +70,7 @@ def create_parser():
     """, formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument('-l', '--lsabgc_detailed_listing', help='lsaBGC-Pan detailed listing with GCF and population structure information.', required=True)
-    parser.add_argument('-m', '--orthomatrix', help='OrthoFinder/Panaroo ortholog by sample matrix.', required=True)
+    parser.add_argument('-m', '--orthomatrix', help='OrthoFinder/Panaroo/bofasa ortholog by sample matrix.', required=True)
     parser.add_argument('-o', '--output_directory', help="Output directory.", required=True)
     parser.add_argument('-vo', '--visual_output_directory', help="Visual output directory.", required=True)
     parser.add_argument('-s', '--species_phylogeny', help="The species phylogeny in Newick format.", required=True)

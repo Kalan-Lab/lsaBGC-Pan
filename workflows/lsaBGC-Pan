@@ -86,7 +86,11 @@ def create_parser():
           - Consider using tools for dereplication/strain-clustering (such as skDER/CiDDER, dRep, PopPunk, 
             or treemmer) to prune down your set of genomes if you have more than 200.
     * Panaroo should only be used if working with genomes belonging to a single bacterial species. If working 
-      with multiple bacterial species or fungal genomes, please use OrthoFinder instead.
+      with multiple bacterial species, consider using bofasa (or OrthoFinder). For fungal genomes, please use 
+      OrthoFinder.
+    * bofasa (https://github.com/raufs/bofasa) is designed for orthology inference across multiple bacterial 
+      species and prioritizes accuracy over speed. It requires the bofasa databases to be set up beforehand 
+      (run "bofasa setup" and make sure the BOFASA_DB_PATH environment variable is set).
     * Specifying fungal mode makes sure OrthoFinder is being used and that antiSMASH results were provided. 
       GECCO is not designed for fungal genomes. In addition, customized processing designed for bacterial 
       genomics is not performed and a more direct extraction of hierarchical orthogroups is applied.
@@ -105,7 +109,7 @@ def create_parser():
                    is requested, then it will also be run and overlapping GECCO and antiSMASH BGC regions will 
                    be consolidated by taking
                    the larger region. 
-        - Step 2: Run OrthoFinder/Panaroo for orthology inference.
+        - Step 2: Run OrthoFinder/Panaroo/bofasa for orthology inference.
         - Step 3: Create species tree/phyogeny from (near-) core ortholog groups.
         - Step 4: Infer populations (will do so at multiple "core AAI" cutoffs) [no checkpoint, always rerun].
         - Step 5: Run lsaBGC-Cluster.py to determine evolutionary GCFs (by default in testing mode unless 
@@ -139,6 +143,7 @@ def create_parser():
 	parser.add_argument('-rg', '--run-gecco', action='store_true', help="If antiSMASH results are provided also run GECCO for\nannotation of BGCs.", required=False, default=False)
 
 	parser.add_argument('-up', '--use-panaroo', action='store_true', help='Use Panaroo instead of OrthoFinder for orthology inference.\nRecommended if investigating a single bacterial species.', default=False, required=False)
+	parser.add_argument('-ub', '--use-bofasa', action='store_true', help='Use bofasa instead of OrthoFinder for orthology inference.\nRecommended if investigating multiple bacterial species.\nRequires bofasa databases to be set up (bofasa setup).', default=False, required=False)
 	parser.add_argument('-omc', '--run-coarse-orthofinder', action='store_true', help='Use coarse clustering for orthogroups in OrthoFinder instead\nof the more resolute hierarchical determined homolog groups.\nThere are some advantages to coarse OGs, including their\nconstruction being deterministic.', required=False, default=False)
 	parser.add_argument('-ohq', '--run-msa-orthofinder', action='store_true', help='Run OrthoFinder using multiple sequence alignments instead of\nDendroBlast to determine hierarchical ortholog groups.', required=False, default=False)
 
@@ -201,6 +206,7 @@ def lsaBGC():
 	keep_lt_flag = myargs.keep_locus_tags
 
 	use_panaroo_flag = myargs.use_panaroo
+	use_bofasa_flag = myargs.use_bofasa
 	run_coarse_orthofinder_flag = myargs.run_coarse_orthofinder
 	run_msa_orthofinder_flag = myargs.run_msa_orthofinder
 	
@@ -302,8 +308,19 @@ def lsaBGC():
 	parameters_handle.write(' '.join(sys.argv) + '\n')
 	parameters_handle.close()
 
+	if use_panaroo_flag and use_bofasa_flag:
+		msg = 'Both --use-panaroo and --use-bofasa were specified, please only specify one, exiting ...'
+		sys.stderr.write(msg + '\n')
+		logObject.error(msg)
+		sys.exit(1)
+
 	if fungal_flag:
+		if use_panaroo_flag or use_bofasa_flag:
+			msg = 'fungal mode triggered but --use-panaroo or --use-bofasa also specified, these are designed for bacteria - so using OrthoFinder instead.'
+			sys.stderr.write(msg + '\n')
+			logObject.warning(msg)
 		use_panaroo_flag = False
+		use_bofasa_flag = False
 		try:
 			assert(antismash_directory != None and os.path.isdir(antismash_directory))
 			if run_gecco_flag:
@@ -334,6 +351,29 @@ def lsaBGC():
 
 > Please try running the following:
 $ pip3 install git+https://github.com/gtonkinhill/panaroo
+
+Then, please try re-running lsaBGC-Pan again!
+""")
+			sys.exit(1)
+	elif use_bofasa_flag:
+		if shutil.which('bofasa') is None:
+			sys.stderr.write("""
+[ERROR] bofasa requested but not installed! 
+
+> Please try running the following in your lsaBGC-Pan conda environment:
+$ conda install -c conda-forge -c bioconda bofasa
+$ bofasa setup --skip-genomad
+
+Then, please try re-running lsaBGC-Pan again!
+""")
+			sys.exit(1)
+		bofasa_db_dir = os.getenv('BOFASA_DB_PATH', '').strip()
+		if not bofasa_db_dir or not os.path.isfile(os.path.join(bofasa_db_dir, 'database_location_paths.txt')):
+			sys.stderr.write("""
+[ERROR] bofasa requested but its databases do not appear to be set up! 
+
+> Please make sure the BOFASA_DB_PATH environment variable is set and that databases were downloaded:
+$ bofasa setup --skip-genomad
 
 Then, please try re-running lsaBGC-Pan again!
 """)
@@ -831,7 +871,18 @@ is experimental and might cause issues.
 	ortholog_matrix_file = outdir + 'Sample_by_Orthogroups_Matrix.tsv'
 	step_2_checkpoint_file = check_dir + 'Step_2.txt'
 	if not os.path.isfile(step_2_checkpoint_file):
-		if not use_panaroo_flag:
+		if use_bofasa_flag:
+			bofasa_input_dir = scratch_dir + 'bofasa_inputs/'
+			bofasa_prep_dir = scratch_dir + 'bofasa_prep/'
+			bofasa_results_dir = outdir + 'bofasa_Results/'
+			util.setupReadyDirectory([bofasa_input_dir])
+			for d in [bofasa_prep_dir, bofasa_results_dir]:
+				if os.path.isdir(d):
+					shutil.rmtree(d)
+
+			og_results_matrix = util.runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, bofasa_results_dir, logObject, threads=threads)
+			os.system('mv %s %s' % (og_results_matrix, ortholog_matrix_file))
+		elif not use_panaroo_flag:
 			proteomes_dir = scratch_dir + 'orthofinder_inputs/'
 			orthofinder_results_dir = outdir + 'OrthoFinder_Results/'
 			util.setupReadyDirectory([proteomes_dir])

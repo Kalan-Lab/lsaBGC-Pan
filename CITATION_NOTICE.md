@@ -9,6 +9,7 @@ lsaBGC-Pan is made possible by many other tools including:
 - Ortholog group identification:
     - OrthoFinder2: https://genomebiology.biomedcentral.com/articles/10.1186/s13059-019-1832-y
     - Panaroo: https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-02090-4
+    - bofasa: https://github.com/raufs/bofasa
 
 - General processing of sequencing data and phylogenies:
     - biopython: https://academic.oup.com/bioinformatics/article/25/11/1422/330687

@@ -1584,6 +1584,108 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 		sys.exit(1)
 	return result_file
 
+def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, results_directory, logObject, threads=1):
+	"""
+	Definition:
+	Wrapper function to run bofasa (https://github.com/raufs/bofasa) for multi-species bacterial orthology inference.
+	********************************************************************************************************************
+	Parameters:
+	- detailed_BGC_listing_file: A detailed BGC listing file with positional/location information for each BGC.
+	- bofasa_input_dir: Directory where symlinks to the full-genome GenBank files (named by sample) will be created.
+	- bofasa_prep_dir: The output directory for "bofasa prep".
+	- results_directory: The output directory for "bofasa run".
+	- logObject: A python logging object.
+	- threads (optional): The number of threads to use. Default is 1.
+	********************************************************************************************************************
+	Returns:
+	- result_file: The resulting orthogroup by sample carriage matrix.
+	********************************************************************************************************************
+	"""
+	result_file = results_directory + 'Final_Orthogroups.tsv'
+	try:
+		sample_genomes = {}
+		with open(detailed_BGC_listing_file) as odlf:
+			for i, line in enumerate(odlf):
+				if i == 0: continue
+				line = line.strip()
+				sample, _, genome_gbk = line.split('\t')[:3]
+				sample_genomes[sample] = genome_gbk
+
+		# bofasa uses the GenBank file basename (minus extension) as the sample name, so create symlinks named by
+		# sample to make sure columns in the resulting matrix match lsaBGC-Pan sample names.
+		bofasa_inputs = []
+		for sample in sorted(sample_genomes):
+			link_path = bofasa_input_dir + sample + '.gbk'
+			os.symlink(os.path.abspath(sample_genomes[sample]), link_path)
+			bofasa_inputs.append(link_path)
+
+		# locus tags in the lsaBGC-Pan GenBank files are retained since --rename-locus-tags is not specified.
+		prep_cmd = ['bofasa', 'prep', '-i', ' '.join(bofasa_inputs), '-o', bofasa_prep_dir, '-c', str(threads), '-y']
+		runCmdViaSubprocess(prep_cmd, logObject=logObject, check_directories=[bofasa_prep_dir],
+							stdout=bofasa_prep_dir.rstrip('/') + '.stdout.log', stderr=bofasa_prep_dir.rstrip('/') + '.stderr.log')
+
+		bofasa_ogs_file = results_directory + 'Final_Results/Protein_Ortholog_Groups.tsv'
+		run_cmd = ['bofasa', 'run', '-i', bofasa_prep_dir, '-o', results_directory, '-c', str(threads), '-y']
+		runCmdViaSubprocess(run_cmd, logObject=logObject, check_files=[bofasa_ogs_file],
+							stdout=results_directory.rstrip('/') + '.stdout.log', stderr=results_directory.rstrip('/') + '.stderr.log')
+
+		# Reformat to the standard lsaBGC-Pan orthogroup by sample matrix. bofasa should report singletons, but
+		# any CDS features not accounted for (e.g. very short proteins filtered by bofasa) are added as singletons.
+		result_handle = open(result_file, 'w')
+		clustered_lts = set([])
+		genomes = []
+		cds_iter = 1
+		with open(bofasa_ogs_file) as obof:
+			for i, line in enumerate(obof):
+				line = line.rstrip('\n')
+				ls = line.split('\t')
+				if i == 0:
+					genomes = ls[1:]
+					result_handle.write('\t'.join(['Orthogroup'] + genomes) + '\n')
+				else:
+					for lts in ls[1:]:
+						for lt in lts.split(', '):
+							lt = lt.strip()
+							if lt != '': clustered_lts.add(lt)
+					result_handle.write('\t'.join(['OG' + determineAsofName(cds_iter)] + ls[1:]) + '\n')
+					cds_iter += 1
+
+		for sample in sample_genomes:
+			if not sample in genomes:
+				raise RuntimeError(f'Sample {sample} not found as a column in bofasa results: {bofasa_ogs_file}')
+			gbk = sample_genomes[sample]
+			with open(gbk) as ogbk:
+				for rec in SeqIO.parse(ogbk, 'genbank'):
+					for feat in rec.features:
+						if not feat.type == 'CDS': continue
+						try:
+							lt = feat.qualifiers.get('locus_tag')[0]
+						except Exception as e:
+							msg = f'Warning: no locus tag for feature {feat.type} in GenBank file {gbk}. Skipping.'
+							sys.stderr.write(msg + '\n')
+							continue
+
+						if not lt in clustered_lts:
+							printlist = ['OG' + determineAsofName(cds_iter)]
+							cds_iter += 1
+							for genome in genomes:
+								if genome == sample:
+									printlist.append(lt)
+								else:
+									printlist.append('')
+							result_handle.write('\t'.join(printlist) + '\n')
+		result_handle.close()
+
+		assert (os.path.isfile(result_file))
+	except Exception as e:
+		msg = "Problem with determining orthogroups using bofasa."
+		logObject.error(msg)
+		logObject.error(traceback.format_exc())
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		sys.exit(1)
+	return result_file
+
 def setupReadyDirectory(directories):
 	"""
 	Simple function to (re-)create directories provided as a list.  

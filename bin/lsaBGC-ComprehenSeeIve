@@ -64,7 +64,7 @@ def create_parser():
 
     parser.add_argument('-g', '--gcf_id', help='Focal GCF identifier', required=True)
     parser.add_argument('-l', '--lsabgc_detailed_listing', help='lsaBGC-Pan detailed listing with GCF and population structure information.', required=True)
-    parser.add_argument('-m', '--orthomatrix', help='OrthoFinder/Panaroo ortholog by sample matrix.', required=True)
+    parser.add_argument('-m', '--orthomatrix', help='OrthoFinder/Panaroo/bofasa ortholog by sample matrix.', required=True)
     parser.add_argument('-o', '--output_directory', help="Output directory.", required=True)
     parser.add_argument('-s', '--species_phylogeny', help="The species phylogeny in Newick format.", required=False, default=None)
     parser.add_argument('-y', '--create_gcf_phylogeny', action='store_true', help="Create phylogeny from sequences of homolog groups in GCF.", required=False, default=False)

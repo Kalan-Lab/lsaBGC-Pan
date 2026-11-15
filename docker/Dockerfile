@@ -13,7 +13,7 @@ SHELL ["/bin/bash", "-c"]
 # github repo and create conda environment
 RUN apt-get update && apt-get install -y git wget gcc && \
     conda install -n base conda-libmamba-solver && conda config --set solver libmamba && \
-    conda create -p /usr/src/lsaBGC_conda_env/ -c conda-forge -c bioconda lsabgc panaroo && \
+    conda create -p /usr/src/lsaBGC_conda_env/ -c conda-forge -c bioconda lsabgc panaroo bofasa && \
     conda clean --all -y && \
     echo "source activate /usr/src/lsaBGC_conda_env/" > ~/.bashrc && source ~/.bashrc && \
     apt-get clean -y && apt-get autoclean -y && apt-get autoremove -y && \
@@ -23,7 +23,10 @@ RUN apt-get update && apt-get install -y git wget gcc && \
 ENV PATH /usr/src/lsaBGC_conda_env/bin:$PATH
 ENV ZOL_EXEC_PATH /usr/src/lsaBGC_conda_env/bin/
 ENV ZOL_DATA_PATH /usr/src/lsaBGC_conda_env/share/zol-1.6.3/db/
-RUN printf "yes\n" | setup_annotation_dbs.py -ld && chmod 777 /home
+ENV BOFASA_DB_PATH /usr/src/lsaBGC_conda_env/share/bofasa/db/
+RUN printf "yes\n" | setup_annotation_dbs.py -ld && \
+    mkdir -p ${BOFASA_DB_PATH} && bofasa setup --skip-genomad --force -y && \
+    chmod 777 /home
 USER 1000:1000
 RUN mkdir /home/input /home/output
 WORKDIR /home
