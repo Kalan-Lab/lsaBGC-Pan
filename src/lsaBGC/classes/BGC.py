@@ -10,11 +10,7 @@ import copy
 import _pickle as cPickle
 from lsaBGC import util
 
-gecco_pickle_weights_file = None
-try:
-	gecco_pickle_weights_file = os.environ["GECCO_DOMAIN_WEIGHTS_PKL_FILE"]
-except Exception as e:
-	pass 
+gecco_pickle_weights_file = os.environ.get("GECCO_DOMAIN_WEIGHTS_PKL_FILE")
 
 class BGC:
 	def __init__(self, bgc_genbank, bgc_id, is_expansion_bgc, prediction_method='ANTISMASH'):
@@ -30,8 +26,11 @@ class BGC:
 		domains = []
 		domain_weights = {}
 
-		gecco_pfam_weights_pickle_handle = open(gecco_pickle_weights_file, "rb")
-		gecco_pfam_weights = cPickle.load(gecco_pfam_weights_pickle_handle)
+		weights_file = os.environ.get("GECCO_DOMAIN_WEIGHTS_PKL_FILE", gecco_pickle_weights_file)
+		if weights_file == None or not os.path.isfile(weights_file):
+			raise RuntimeError('GECCO domain weights file not found - please set the environment variable GECCO_DOMAIN_WEIGHTS_PKL_FILE to the path of GECCO_PF_Weights.pkl (https://github.com/Kalan-Lab/lsaBGC/raw/main/db/GECCO_PF_Weights.pkl).')
+		with open(weights_file, "rb") as gecco_pfam_weights_pickle_handle:
+			gecco_pfam_weights = cPickle.load(gecco_pfam_weights_pickle_handle)
 		rec = SeqIO.read(self.bgc_genbank, 'genbank')
 		full_sequence = str(rec.seq)
 		for feature in rec.features:
@@ -41,14 +40,8 @@ class BGC:
 				aSDomain = "NA"
 				description = "NA"
 				dom_weight = -7
-				try:
-					aSDomain = feature.qualifiers['standard_name'][0]
-				except Exception as e:
-					pass
-				try:
-					description = feature.qualifiers['function'][0]
-				except Exception as e:
-					pass
+				aSDomain = feature.qualifiers.get('standard_name', [aSDomain])[0]
+				description = feature.qualifiers.get('function', [description])[0]
 				try:
 					dom_weight = gecco_pfam_weights[aSDomain]
 				except Exception as e:
@@ -91,10 +84,7 @@ class BGC:
 				end = feature.location.end
 				direction = "-" if feature.location.strand == -1 else "+"
 
-				try:
-					product = feature.qualifiers.get('product')[0]
-				except Exception as e:
-					product = "hypothetical protein"
+				product = feature.qualifiers.get('product', ["hypothetical protein"])[0]
 
 				grange = set(range(start, end + 1))
 
@@ -186,26 +176,17 @@ class BGC:
 				full_sequence = str(rec.seq)
 				for feature in rec.features:
 					if comprehensive_parsing and feature.type in domain_feature_types:
-						all_coords, start, end, direction, is_multi_part = util.parseCDSCoord(str(feature.location))
+						all_coords, start, end, direction, is_multi_part = util.parseCDSCoord(str(feature.location), record_length=len(rec.seq))
 
 						aSDomain = "NA"
 						description = "NA"
-						try:
-							aSDomain = feature.qualifiers.get('aSDomain')[0]
-						except Exception as e:
-							pass
-						try:
-							description = feature.qualifiers.get('description')[0]
-						except Exception as e:
-							pass
+						aSDomain = feature.qualifiers.get('aSDomain', [aSDomain])[0]
+						description = feature.qualifiers.get('description', [description])[0]
 						domains.append({'start': start, 'end': end, 'type': feature.type, 'aSDomain': aSDomain,
 										'description': description, 'is_multi_part': is_multi_part})
 					elif feature.type == 'protocluster':
 						detection_rule = feature.qualifiers.get('detection_rule')[0]
-						try:
-							product = feature.qualifiers.get('product')[0]
-						except Exception as e:
-							product = "NA"
+						product = feature.qualifiers.get('product', ["NA"])[0]
 						contig_edge = feature.qualifiers.get('contig_edge')[0]
 						bgc_info.append(
 							{'detection_rule': detection_rule, 'product': product, 'contig_edge': contig_edge,
@@ -243,19 +224,13 @@ class BGC:
 							sys.stderr.write(msg + '\n')
 							continue
 
-						all_coords, start, end, direction, is_multi_part = util.parseCDSCoord(str(feature.location))
+						all_coords, start, end, direction, is_multi_part = util.parseCDSCoord(str(feature.location), record_length=len(rec.seq))
 
-						try:
-							product = feature.qualifiers.get('product')[0]
-						except Exception as e:
-							product = "hypothetical protein"
+						product = feature.qualifiers.get('product', ["hypothetical protein"])[0]
 
 						rule_based_bgc_cds = False
-						try:
-							if 'rule-based-clusters' in feature.qualifiers.get('gene_functions')[0]:
-								rule_based_bgc_cds = True
-						except Exception as e:
-							pass
+						if 'rule-based-clusters' in feature.qualifiers.get('gene_functions', [''])[0]:
+							rule_based_bgc_cds = True
 
 						grange = set(range(start, end + 1))
 						core_overlap = False
@@ -289,7 +264,7 @@ class BGC:
 							if end >= len(full_sequence): end = len(full_sequence)
 
 							nucl_seq = ''
-							for sc, ec, dc in sorted(all_coords, key=itemgetter(0), reverse=False):
+							for sc, ec, dc in all_coords:
 								if ec >= len(full_sequence):
 									nucl_seq += full_sequence[sc - 1:]
 								else:

@@ -4,9 +4,11 @@ import json
 from Bio import SeqIO
 import logging
 import subprocess
+import shutil
 import statistics
 from operator import itemgetter
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
+from Bio.SeqRecord import SeqRecord
 import traceback
 import concurrent.futures
 from ete3 import Tree
@@ -26,6 +28,9 @@ except importlib.metadata.PackageNotFoundError:
 	
 valid_alleles = set(['A', 'C', 'G', 'T'])
 
+# characters in paths which would break commands run through the shell (whitespace and shell special characters)
+SHELL_UNSAFE_CHARACTERS = set([' ', '\t', '\n', ';', '&', '|', '<', '>', '(', ')', '$', '`', "'", '"', '\\', '*', '?', '!', '[', ']', '{', '}'])
+
 def reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject):
 	"""
 	Description:
@@ -42,8 +47,7 @@ def reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject):
 	"""
 	ortholog_listing_file = zol_results_dir + 'LocusTag_to_Ortholog_Relations.txt'
 	try:
-		outf = open(ortholog_listing_file, 'w')
-		with open(ortholog_matrix_file) as omf:
+		with open(ortholog_listing_file, 'w') as outf, open(ortholog_matrix_file) as omf:
 			for i, line in enumerate(omf):
 				line = line.strip('\n')
 				ls = line.split('\t')
@@ -53,7 +57,6 @@ def reformatOrthologInfo(ortholog_matrix_file, zol_results_dir, logObject):
 					for lt in lts.split(', '):
 						if lt.strip() != '':
 							outf.write(lt + '\t' + og + '\n')
-		outf.close()
 		return (ortholog_listing_file)
 	except Exception as e:
 		msg = 'Issue reformatting ortholog group matrix to table format for use as input for zol.'
@@ -160,7 +163,7 @@ def runMIBiGMapper(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_matr
 		for gcf in gcfs:
 			resdir = mibig_dir + gcf + '/'
 			lsabgc_map_cmd = ['lsaBGC-MIBiGMapper', '-g', gcf, '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, 
-					 		 '-m', ortholog_matrix_file, '-o', resdir, '-c', str(multi_thread), logObject]
+							  '-m', ortholog_matrix_file, '-o', resdir, '-c', str(multi_thread), logObject]
 			lsabgc_map_cmds.append(lsabgc_map_cmd)
 		try:
 			with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
@@ -213,9 +216,9 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 			gcf_see_resdir = see_dir + gcf + '/'
 			gcf_csi_resdir = compsee_dir + gcf + '/'
 			lsabgc_see_cmd = ['lsaBGC-See', '-g', gcf, '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, 
-					          '-s', species_tree, '-m', ortholog_matrix_file, '-o', gcf_see_resdir, logObject]
+							  '-s', species_tree, '-m', ortholog_matrix_file, '-o', gcf_see_resdir, logObject]
 			lsabgc_csi_cmd = ['lsaBGC-ComprehenSeeIve', '-g', gcf, '-l', detailed_BGC_listing_with_Pop_and_GCF_map_file, 
-					          '-s', species_tree, '-m', ortholog_matrix_file, '-o', gcf_csi_resdir, logObject]
+							  '-s', species_tree, '-m', ortholog_matrix_file, '-o', gcf_csi_resdir, logObject]
 			lsabgc_see_and_csi_cmds.append(lsabgc_see_cmd)
 			lsabgc_see_and_csi_cmds.append(lsabgc_csi_cmd)
 
@@ -243,7 +246,7 @@ def runSeeAndComprehenSeeIve(detailed_BGC_listing_with_Pop_and_GCF_map_file, spe
 def computeConservationOfOGWithinGCFContext(inputs):
 	"""
 	Description:
-	Void function which computes the conservation of an orhtogroup across BGC instances within a GCF. 
+	Void function which computes the conservation of an orthogroup across BGC instances within a GCF. 
 	********************************************************************************************************************
 	Parameters:
 	- inputs: A list for four items:
@@ -273,11 +276,10 @@ def computeConservationOfOGWithinGCFContext(inputs):
 						og = lt_to_og[lt]
 						og_bgcs[og].add(bgc)
 		
-		outf = open(output_file, 'w')
-		for og in og_bgcs:
-			og_bgc_prop = len(og_bgcs[og])/float(len(bgc_paths))
-			outf.write(og + '\t' + str(og_bgc_prop) + '\n')
-		outf.close()	
+		with open(output_file, 'w') as outf:
+			for og in og_bgcs:
+				og_bgc_prop = len(og_bgcs[og])/float(len(bgc_paths))
+				outf.write(og + '\t' + str(og_bgc_prop) + '\n')
 	except Exception as e:
 		msg = 'Issues computing conservation of orthogroups for complete instances of GCF %s' % output_file.split('/')[-1].split('.txt')[0]
 		logObject.error(msg)
@@ -320,9 +322,9 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 				line = line.strip()
 				sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
 				gcf_sample_bgcs[gcf_id][sample].append(bgc_path)
+				gcf_bgcs[gcf_id].append(bgc_path)
 				if float(dist_to_edge) <= zol_edge_distance:
 					edgy_bgcs.add(bgc_path)
-					gcf_bgcs[gcf_id].append(bgc_path)
 
 		zol_cmds = []
 		cgc_cmds = []
@@ -349,9 +351,9 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 			gcf_full_bgcs_to_input = list(set(gcf_bgcs_to_input).difference(edgy_bgcs))
 			if len(gcf_bgcs_to_input) > 0:
 				zol_comp_cmd = ['zol', '-c', str(multi_thread), '-i', ' '.join(gcf_bgcs_to_input), zp, '-po', ortholog_listing_file, 
-					            '-o', zol_comp_results_dir + gcf + '/', logObject]
+								'-o', zol_comp_results_dir + gcf + '/', logObject]
 				cgc_comp_cmd = ['cgc', '-i', zol_comp_results_dir + gcf + '/', '-t', 'conservation', 'conservation', 
-					            'entropy', '-c', 'grey', 'white_to_black', 'light_to_dark_green', '-rh', '1.7', 
+								'entropy', '-c', 'grey', 'white_to_black', 'light_to_dark_green', '-rh', '1.7', 
 								'1', '1', '-sl', '-p', '-sc', '-ld', '0.04', '-lts', '3.0', '-b', '0.5', '-w', '8', 
 								'-o', cgc_results_dir + gcf + '/', logObject]
 				zol_cmds.append(zol_comp_cmd)
@@ -412,6 +414,20 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 		sys.exit(1)
 
 
+def prioritizeEnvironmentBinPath():
+	"""
+	Description:
+	Places the bin/ directory of the python interpreter running lsaBGC-Pan (i.e. the conda environment) at the front
+	of PATH, so that dependencies started via "#!/usr/bin/env python3" shebangs (e.g. OrthoFinder, which bofasa calls)
+	use the environment's python and its packages rather than another python (e.g. Homebrew's) found earlier on PATH.
+	"""
+	env_bin = os.path.dirname(os.path.abspath(sys.executable))
+	path_dirs = [d for d in os.environ.get('PATH', '').split(os.pathsep) if d]
+	if len(path_dirs) == 0 or os.path.abspath(path_dirs[0]) != env_bin:
+		path_dirs = [env_bin] + [d for d in path_dirs if os.path.abspath(d) != env_bin]
+		os.environ['PATH'] = os.pathsep.join(path_dirs)
+
+
 def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL):
 	"""
 	Description:
@@ -426,25 +442,46 @@ def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[
 	"""
 	if logObject != None:
 		logObject.info('Running %s' % ' '.join(cmd))
+	opened_handles = []
+	log_files = [x for x in [stdout, stderr] if isinstance(x, str)]
 	try:
 		if isinstance(stdout, str):
 			stdout = open(stdout, 'w')
+			opened_handles.append(stdout)
 		if isinstance(stderr, str):
 			stderr = open(stderr, 'w')
+			opened_handles.append(stderr)
 
-		subprocess.call(' '.join(cmd), shell=True, stdout=stdout, stderr=stderr,
+		return_code = subprocess.call(' '.join(cmd), shell=True, stdout=stdout, stderr=stderr,
 						executable='/bin/bash')
+		if return_code != 0:
+			# if expected outputs are specified, rely on them to determine success (some tools, e.g. R scripts, can
+			# exit non-zero after producing their results), otherwise treat the non-zero exit as a failure.
+			if len(check_files) == 0 and len(check_directories) == 0:
+				raise RuntimeError('Command exited with non-zero return code %d' % return_code)
+			msg = 'Warning: command exited with non-zero return code %d: %s' % (return_code, ' '.join(cmd))
+			sys.stderr.write(msg + '\n')
+			if logObject != None:
+				logObject.warning(msg)
 		for cf in check_files:
-			assert (os.path.isfile(cf))
+			if not os.path.isfile(cf):
+				raise RuntimeError('Expected output file was not created: %s' % cf)
 		for cd in check_directories:
-			assert (os.path.isdir(cd))
+			if not os.path.isdir(cd):
+				raise RuntimeError('Expected output directory was not created: %s' % cd)
 		if logObject != None:
 			logObject.info('Successfully ran: %s' % ' '.join(cmd))
 	except Exception as e:
+		msg = 'Had an issue running: %s' % ' '.join(cmd)
+		if log_files:
+			msg += '\nCheck the tool\'s log files for details: %s' % ', '.join(log_files)
 		if logObject != None:
-			logObject.error('Had an issue running: %s' % ' '.join(cmd))
+			logObject.error(msg)
 			logObject.error(traceback.format_exc())
-		raise RuntimeError('Had an issue running: %s' % ' '.join(cmd))
+		raise RuntimeError(msg) from e
+	finally:
+		for handle in opened_handles:
+			handle.close()
 
 
 def mapColorsToCategories(categories_set, colors_file, colors_mapping_file):
@@ -467,11 +504,10 @@ def mapColorsToCategories(categories_set, colors_file, colors_mapping_file):
 		
 		assert(len(colors) >= len(categories_set))
 
-		cmf_handle = open(colors_mapping_file, 'w')
-		cmf_handle.write('category\tcolor\n')
-		for i, cat in enumerate(sorted(categories_set)):
-			cmf_handle.write(cat + '\t"' + colors[i] + '"\n')
-		cmf_handle.close()
+		with open(colors_mapping_file, 'w') as cmf_handle:
+			cmf_handle.write('category\tcolor\n')
+			for i, cat in enumerate(sorted(categories_set)):
+				cmf_handle.write(cat + '\t"' + colors[i] + '"\n')
 	
 	except Exception as e:
 		msg = 'Issue mapping colors from file to categories, potentially because too few colors provided.'
@@ -482,14 +518,14 @@ def mapColorsToCategories(categories_set, colors_file, colors_mapping_file):
 def pairwiseDistancesFromTree(tree_file, logObject):
 	"""
 	Description:
-	Function to compute the branch distance between leafs in a newick tree.
+	Function to compute the branch distance between leaves in a newick tree.
 	********************************************************************************************************************
 	Parameters:
 	- tree_file: The input tree file in Newick format.
 	- logObject: a python logging object
 	********************************************************************************************************************
 	Returns:
-	-  pairwise_distances: A dictionary showing branch distances between pairs of leafs.
+	-  pairwise_distances: A dictionary showing branch distances between pairs of leaves.
 	********************************************************************************************************************
 	"""
 	pairwise_distances = defaultdict(lambda: defaultdict(lambda: None))
@@ -539,11 +575,10 @@ def generateColors(workspace, outfile, color_count, palette='Spectral', palette_
 		workspace = os.path.abspath(workspace) + '/'
 	
 		color_brew_script = workspace + 'brewColors.R'
-		cbs_handle = open(color_brew_script, 'w')
-		cbs_handle.write('library(RColorBrewer)\n')
-		cbs_handle.write('mycolors <- colorRampPalette(brewer.pal(' + str(palette_color_count) + ', "' + palette + '"))(' + str(color_count) + ')\n')
-		cbs_handle.write('write(mycolors, file="' + outfile + '")\n')		
-		cbs_handle.close()
+		with open(color_brew_script, 'w') as cbs_handle:
+			cbs_handle.write('library(RColorBrewer)\n')
+			cbs_handle.write('mycolors <- colorRampPalette(brewer.pal(' + str(palette_color_count) + ', "' + palette + '"))(' + str(color_count) + ')\n')
+			cbs_handle.write('write(mycolors, file="' + outfile + '")\n')
 
 		rscript_cmd = ['Rscript', color_brew_script]
 		runCmdViaSubprocess(rscript_cmd, check_files=[outfile])
@@ -551,18 +586,26 @@ def generateColors(workspace, outfile, color_count, palette='Spectral', palette_
 	except Exception as e:
 		msg = 'Issues generating colors!'
 		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
 		sys.exit(1)
 
-def parseCDSCoord(location_string):
+def parseCDSCoord(location_string, record_length=None):
 	"""
 	Description:
-	Function to process a location string from a GenBank file.
+	Function to process a location string from a GenBank file (as produced by str(feature.location) in Biopython).
+	Multi-part locations (e.g. spliced genes) are supported, including genes spanning the origin of circular records,
+	e.g. join{[900:1000](+), [0:60](+)}. 
 	********************************************************************************************************************
 	Parameters:
 	- location_string: The location string to process.
+	- record_length (optional): Length of the record the feature is on. Used for features spanning the origin, whose
+	                            end coordinate is then reported as continuing past the end of the record (e.g. 1060 for
+	                            the example above), such that start < end and end - start + 1 is the feature's length.
 	********************************************************************************************************************
 	Returns:
-	- A list of items: [start, end, direction, all_coords]
+	- A list of items: [all_coords, start, end, direction, is_multi_part], where all_coords is a list of [start, end, 
+	  direction] for each part ordered along the genome (for features spanning the origin, starting with the part 
+	  before the origin), start/end are 1-based inclusive coordinates.
 	********************************************************************************************************************
 	"""
 	try:
@@ -586,7 +629,7 @@ def parseCDSCoord(location_string):
 			direction = all_directions[0]
 		elif "join" in location_string:
 			all_directions = []
-			for exon_coord in location_string[5:-1].split("\t"):
+			for exon_coord in location_string[5:-1].split(", "):
 				start = (min([int(x.strip(">").strip("<")) for x in exon_coord[1:].split("]")[0].split(":")])+ 1)
 				end = max([int(x.strip(">").strip("<")) for x in exon_coord[1:].split("]")[0].split(":")])
 				direction = exon_coord.split("(")[1].split(")")[0]
@@ -611,13 +654,35 @@ def parseCDSCoord(location_string):
 			raise RuntimeError(f"Error processing location string {location_string}")
 
 		is_multi_part = False
-		if len(all_coords) > 1: is_multi_part = True
+		if len(all_coords) > 1:
+			is_multi_part = True
+			# Biopython lists parts in biological order: ascending for + strand features and descending for - strand
+			# features. A violation of this order indicates the feature spans the origin of a circular record.
+			listed_starts = [c[0] for c in all_coords]
+			if direction == '-':
+				spans_origin = any(listed_starts[i] > listed_starts[i - 1] for i in range(1, len(listed_starts)))
+			else:
+				spans_origin = any(listed_starts[i] < listed_starts[i - 1] for i in range(1, len(listed_starts)))
+			ascending_coords = sorted(all_coords, key=itemgetter(0))
+			if spans_origin:
+				# order parts along the genome across the origin: the largest gap between consecutive parts (in 
+				# ascending order) is the region not covered by the feature, so parts after it come first.
+				gaps = [ascending_coords[i + 1][0] - ascending_coords[i][1] for i in range(len(ascending_coords) - 1)]
+				k = gaps.index(max(gaps)) + 1
+				all_coords = ascending_coords[k:] + ascending_coords[:k]
+				start = all_coords[0][0]
+				if record_length != None:
+					end = all_coords[-1][1] + record_length
+				else:
+					end = max([c[1] for c in ascending_coords[k:]])
+			else:
+				all_coords = ascending_coords
 		return [all_coords, start, end, direction, is_multi_part] # type: ignore
 	except Exception as e:
 		sys.stderr.write(traceback.format_exc())
 		raise RuntimeError(
 			f"Error processing location string {location_string}"
-		)
+		) from e
 
 def cleanUpSampleName(original_name):
 	"""
@@ -628,7 +693,7 @@ def cleanUpSampleName(original_name):
 	- name: A string corresponding to some name.
 	********************************************************************************************************************
 	Returns:
-	-  cleaned_up_name: A cleaned up string where troublesome characters for having as part of fielnames are replaced 
+	-  cleaned_up_name: A cleaned up string where troublesome characters for having as part of filenames are replaced 
 	                    with less problematic characters.
 	********************************************************************************************************************
 	"""
@@ -666,7 +731,8 @@ def parseGECCOGBKForFunction(bgc_gbk, logObject):
 		return(product)
 	except Exception as e:
 		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
-		raise RuntimeError()
+		logObject.error(traceback.format_exc())
+		raise RuntimeError('Issues parsing BGC Genbank %s' % bgc_gbk) from e
 
 def parseAntiSMASHGBKForFunction(bgc_gbk, logObject, compress_multi=True):
 	"""
@@ -703,7 +769,8 @@ def parseAntiSMASHGBKForFunction(bgc_gbk, logObject, compress_multi=True):
 				product = ' | '.join(sorted(products))
 	except Exception as e:
 		logObject.error('Issues parsing BGC Genbank %s' % bgc_gbk)
-		raise RuntimeError()
+		logObject.error(traceback.format_exc())
+		raise RuntimeError('Issues parsing BGC Genbank %s' % bgc_gbk) from e
 	return(product)
 
 def parseOrthoFinderMatrix(orthofinder_matrix_file, relevant_gene_lts, all_primary=True):
@@ -767,17 +834,19 @@ def run_cmd(cmd, logObject, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 
 	logObject.info('Running the following command: %s' % ' '.join(cmd))
 	try:
-		subprocess.call(' '.join(cmd), shell=True, stdout=stdout, stderr=stderr, executable='/bin/bash')
+		return_code = subprocess.call(' '.join(cmd), shell=True, stdout=stdout, stderr=stderr, executable='/bin/bash')
+		if return_code != 0:
+			raise RuntimeError('Command exited with non-zero return code %d' % return_code)
 		logObject.info('Successfully ran: %s' % ' '.join(cmd))
 	except Exception as e:
 		logObject.error('Had an issue running: %s' % ' '.join(cmd))
 		logObject.error(traceback.format_exc())
-		raise RuntimeError('Had an issue running: %s' % ' '.join(cmd))
+		raise RuntimeError('Had an issue running: %s' % ' '.join(cmd)) from e
 
 def multiProcessNoLogWithTimeout(input):
 	"""
 	Description:
-	Void, genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
+	Void, generalizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
 	to space separated command (as list). Similar to more general function, only this one times out after a while.
 	********************************************************************************************************************
 	Parameters:
@@ -789,17 +858,18 @@ def multiProcessNoLogWithTimeout(input):
 	input_cmd = input[:-1]
 	TIMEOUT = input[-1] 
 	try:
-		subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+		return_code = subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 						executable='/bin/bash', timeout=TIMEOUT)
+		if return_code != 0:
+			sys.stderr.write('Warning: command exited with non-zero return code %d: %s\n' % (return_code, ' '.join(input_cmd)))
 	except subprocess.TimeoutExpired:
-		sys.stderr.write('Command timed out: ' + ' '.join(input_cmd))
-		sys.stderr.write(traceback.format_exc())
+		sys.stderr.write('Warning: command timed out after %s seconds: %s\n' % (str(TIMEOUT), ' '.join(input_cmd)))
 		return
 
 def multiProcessNoLog(input_cmd):
 	"""
 	Description:
-	Void, genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
+	Void, generalizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
 	to space separated command (as list). Same as the generalizable function, only this one doesn't take a log object
 	as part of the input.
 	********************************************************************************************************************
@@ -811,18 +881,20 @@ def multiProcessNoLog(input_cmd):
 		cmd_str = ' '.join(input_cmd)
 		if '>' in cmd_str:
 			# Use shell=True to handle redirection properly
-			subprocess.call(cmd_str, shell=True, executable='/bin/bash')
+			return_code = subprocess.call(cmd_str, shell=True, executable='/bin/bash')
 		else:
 			# For commands without redirection, use the original method
-			subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+			return_code = subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 							executable='/bin/bash')
+		if return_code != 0:
+			sys.stderr.write('Warning: command exited with non-zero return code %d: %s\n' % (return_code, cmd_str))
 	except Exception as e:
 		sys.stderr.write(traceback.format_exc())
 
 def multiProcess(input):
 	"""
-	Descirption:
-	Void, genralizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
+	Description:
+	Void, generalizable function to be used with multiprocessing to parallelize list of commands. Inputs should correspond
 	to space separated command (as list), with last item in list corresponding to a logging object handle for logging
 	progress.
 	********************************************************************************************************************
@@ -836,9 +908,14 @@ def multiProcess(input):
 	logObject = input[-1]
 	logObject.info('Running the following command: %s' % ' '.join(input_cmd))
 	try:
-		subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+		return_code = subprocess.call(' '.join(input_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 						executable='/bin/bash')
-		logObject.info('Successfully ran: %s' % ' '.join(input_cmd))
+		if return_code != 0:
+			msg = 'Warning: command exited with non-zero return code %d: %s' % (return_code, ' '.join(input_cmd))
+			logObject.warning(msg)
+			sys.stderr.write(msg + '\n')
+		else:
+			logObject.info('Successfully ran: %s' % ' '.join(input_cmd))
 	except Exception as e:
 		logObject.warning('Had an issue running: %s' % ' '.join(input_cmd))
 		logObject.warning(traceback.format_exc())
@@ -873,8 +950,7 @@ def addLocusTagsToGBKs(inputs):
 		location_to_cds = {}
 		cds_iter = 0
 		updated_genome_gbk = samp_resdir + genome_gbk.split('/')[-1]	
-		ugg_handle = open(updated_genome_gbk, 'w')
-		with open(genome_gbk) as ogg:
+		with open(updated_genome_gbk, 'w') as ugg_handle, open(genome_gbk) as ogg:
 			for rec in SeqIO.parse(ogg, 'genbank'):
 				updated_rec = rec
 				updated_features = []
@@ -920,7 +996,6 @@ def addLocusTagsToGBKs(inputs):
 
 				updated_rec.features = updated_features
 				SeqIO.write(updated_rec, ugg_handle, 'genbank')
-		ugg_handle.close()
 
 		for bgc_gbk in region_gbks:
 			bgc_starts = []
@@ -933,8 +1008,7 @@ def addLocusTagsToGBKs(inputs):
 			bgc_start = bgc_starts[0]
 
 			updated_bgc_gbk = samp_resdir + bgc_gbk.split('/')[-1]	
-			ubg_handle = open(updated_bgc_gbk, 'w')
-			with open(bgc_gbk) as ogbf:
+			with open(updated_bgc_gbk, 'w') as ubg_handle, open(bgc_gbk) as ogbf:
 				for rec in SeqIO.parse(ogbf, 'genbank'):
 					scaff = rec.id
 					updated_rec = rec
@@ -954,18 +1028,17 @@ def addLocusTagsToGBKs(inputs):
 
 					updated_rec.features = updated_features
 					SeqIO.write(updated_rec, ubg_handle, 'genbank')
-			ubg_handle.close()
 
 	except Exception as e:
 		msg = "Problem processing one of the GenBank files for sample %s to add CDS locus tags." % sample
 		logObject.warning(msg)
 		logObject.warning(traceback.format_exc())
 		sys.stderr.write(msg)
-		raise RuntimeError(msg)
+		raise RuntimeError(msg) from e
 
 def checkCDSHaveLocusTags(inputs):
 	"""
-	Descrption:
+	Description:
 	Void function to check if all CDS features in a GenBank file have locus_tag qualifiers.
 	********************************************************************************************************************
 	Parameters:
@@ -995,13 +1068,12 @@ def checkCDSHaveLocusTags(inputs):
 					if locus_tag == None:
 						all_cds_have_lt = False
 
-		outh = open(outf, 'w')
-		outh.write(gbk_type + '\t' + str(sample) + '\t' + gbk + '\t' + str(cds_count) + '\t' + str(all_cds_have_lt) + '\n')
-		outh.close()
+		with open(outf, 'w') as outh:
+			outh.write(gbk_type + '\t' + str(sample) + '\t' + gbk + '\t' + str(cds_count) + '\t' + str(all_cds_have_lt) + '\n')
 	except Exception as e:
 		logObject.warning("Problem processing GenBank file %s for sample %s" % (gbk, sample))
 		logObject.warning(traceback.format_exc())
-		raise RuntimeWarning()
+		raise RuntimeWarning("Problem processing GenBank file %s for sample %s" % (gbk, sample)) from e
 
 def findAntiSMASHBGCInFullGenbank(inputs):
 	"""
@@ -1042,20 +1114,19 @@ def findAntiSMASHBGCInFullGenbank(inputs):
 				assert(full_scaff_length != None)				
 			except Exception as e2:
 				msg = f'Issue finding the location of the BGC {bgc_gbk} for sample {sample}.'
-				raise RuntimeWarning(msg)
+				raise RuntimeWarning(msg) from e2
 				return
 
-			outf_handle = open(outf, 'w')
-			for start_coord in bgc_starts:
-				start_coord += 1
-				end_coord = start_coord + bgc_length - 1 
-				outf_handle.write(bgc_scaffold + '\t' + str(start_coord) + '\t' + str(end_coord) + '\t' + str(min([start_coord-1, full_scaff_length-end_coord])) + '\n')
-			outf_handle.close()
-			
-	except Exception as e:
-		raise RuntimeWarning(traceback.format_exc())
+			with open(outf, 'w') as outf_handle:
+				for start_coord in bgc_starts:
+					start_coord += 1
+					end_coord = start_coord + bgc_length - 1
+					outf_handle.write(bgc_scaffold + '\t' + str(start_coord) + '\t' + str(end_coord) + '\t' + str(min([start_coord-1, full_scaff_length-end_coord])) + '\n')
 
-def processAntiSMAHSBGCtoGenomeMappingResults(process_data, logObject):
+	except Exception as e:
+		raise RuntimeWarning('Issue determining the location of antiSMASH BGC(s) in the full genome GenBank.') from e
+
+def processAntiSMASHBGCtoGenomeMappingResults(process_data, logObject):
 	"""
 	Definition:
 	Function to process antiSMASH BGC to genome mapping results and return the info as a list.
@@ -1101,7 +1172,7 @@ def processAntiSMAHSBGCtoGenomeMappingResults(process_data, logObject):
 		logObject.error(msg)
 		logObject.error(traceback.format_exc())
 		sys.stderr.write(traceback.format_exc())
-		raise RuntimeError(msg)
+		raise RuntimeError(msg) from e
 
 def extractProteinsFromGenBank(inputs):
 	"""
@@ -1117,8 +1188,7 @@ def extractProteinsFromGenBank(inputs):
 	"""
 	input_genbank, output_proteome, logObject = inputs
 	try:
-		op_handle = open(output_proteome, 'w')
-		with open(input_genbank) as oigf:
+		with open(output_proteome, 'w') as op_handle, open(input_genbank) as oigf:
 			for rec in SeqIO.parse(oigf, 'genbank'):
 				for feature in rec.features:
 					if feature.type == 'CDS':
@@ -1131,15 +1201,14 @@ def extractProteinsFromGenBank(inputs):
 							sys.stderr.write(msg + '\n')
 							logObject.warning(msg)
 							pass
-		op_handle.close()
 	except Exception as e:
-		logObject.error("Issues with parsing out protein sequences from GenBank file %s." % input_genbank) 
+		logObject.error("Issues with parsing out protein sequences from GenBank file %s." % input_genbank)
 		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
+		raise RuntimeError("Issues with parsing out protein sequences from GenBank file %s." % input_genbank) from e
 
 def determineAsofName(asof_index):
 	"""
-	Simple function to make integers into strings of equal length by appending 0s as prefices.
+	Simple function to make integers into strings of equal length by appending 0s as prefixes.
 	"""
 	asof_index_str = str(asof_index)
 	asof_name = None
@@ -1156,14 +1225,14 @@ def determineAsofName(asof_index):
 	elif len(asof_index_str) == 6:
 		asof_name = '0' + asof_index_str
 	else:
-		asoof_name = asof_index_str
+		asof_name = asof_index_str
 	assert(asof_name != None)
 	return(asof_name)
 
 def runOrthoFinder2Full(prot_directory, orthofinder_outdir, run_msa, logObject, threads=1):
 	"""
 	Definition:
-	Wrapper function to run OrthoFinder2 for bacteria (involves some extra processing of hierearchical orthogroups).
+	Wrapper function to run OrthoFinder2 for bacteria (involves some extra processing of hierarchical orthogroups).
 	********************************************************************************************************************
 	Parameters:
 	- prot_directory: The input directory of proteomes in FASTA format to provide to OrthoFinder2 as input.
@@ -1191,33 +1260,33 @@ def runOrthoFinder2Full(prot_directory, orthofinder_outdir, run_msa, logObject, 
 			[prot_directory + 'OrthoFinder/' + f for f in os.listdir(prot_directory + 'OrthoFinder/') if
 			 f.startswith('Results')][0]) + '/'
 
-		os.system('mv %s %s' % (tmp_orthofinder_dir, orthofinder_outdir))
+		shutil.move(tmp_orthofinder_dir, orthofinder_outdir)
 		main_file = orthofinder_outdir + 'Orthogroups/Orthogroups.tsv'
 		singletons_file = orthofinder_outdir + 'Orthogroups/Orthogroups_UnassignedGenes.tsv'
 		n0_file = orthofinder_outdir + 'Phylogenetic_Hierarchical_Orthogroups/N0.tsv'
 		putative_xenologs_dir = orthofinder_outdir + 'Putative_Xenologs/'
 		phylo_misplaced_genes_dir = orthofinder_outdir + 'Phylogenetically_Misplaced_Genes/'
 		
-		result_handle = open(result_file, 'w')
+		with open(result_file, 'w') as result_handle:
 
-		gene_to_hog = {}
-		gene_to_og = {}
-		with open(n0_file) as n0f:
-			for i, line in enumerate(n0f):
-				line = line.strip('\n')
-				ls = line.split('\t')
-				if i == 0:
-					genomes = ls[3:]
-					result_handle.write('Orthogroup\t' + '\t'.join(genomes) + '\n')
-				else:
-					hog = ls[0].split('N0.')[1]
-					og = ls[1]
-					for j, gs in enumerate(ls[3:]):
-						genome = genomes[j]
-						for gene in gs.split(', '):
-							gene = gene.strip()
-							gene_to_hog[gene] = hog
-							gene_to_og[gene] = og
+			gene_to_hog = {}
+			gene_to_og = {}
+			with open(n0_file) as n0f:
+				for i, line in enumerate(n0f):
+					line = line.strip('\n')
+					ls = line.split('\t')
+					if i == 0:
+						genomes = ls[3:]
+						result_handle.write('Orthogroup\t' + '\t'.join(genomes) + '\n')
+					else:
+						hog = ls[0].split('N0.')[1]
+						og = ls[1]
+						for j, gs in enumerate(ls[3:]):
+							genome = genomes[j]
+							for gene in gs.split(', '):
+								gene = gene.strip()
+								gene_to_hog[gene] = hog
+								gene_to_og[gene] = og
 
 		genome_misplaced_genes = defaultdict(set)
 		fg_to_genome = {}
@@ -1254,78 +1323,77 @@ def runOrthoFinder2Full(prot_directory, orthofinder_outdir, run_msa, logObject, 
 					top_hog = hog
 					top_hits += 1
 			if top_hits == 1:
-				hog_missing_to_add[top_hog][genome].add(fg)
+				hog_missing_to_add[top_hog][fg_to_genome[fg]].add(fg)
 
 		genomes = []
 		genome_genes_accounted = defaultdict(set)
-		result_handle = open(result_file, 'w')
-		with open(n0_file) as n0f:
-			for i, line in enumerate(n0f):
-				line = line.strip('\n')
-				ls = line.split('\t')
-				if i == 0:
-					genomes = ls[3:]
-					result_handle.write('Orthogroup\t' + '\t'.join(genomes) + '\n')
-				else:
-					hog = ls[0].split('N0.')[1]
-					og = ls[1]
-					printlist = []
-					for j, gs in enumerate(ls[3:]):
-						genome = genomes[j]
-						gss = set(gs.split(', '))
-						gss_with_missing = gss.union(hog_missing_to_add[hog][genome]) 
-						printlist.append(', '.join(sorted(gss_with_missing)))
-						for gene in gss_with_missing:
-							genome_genes_accounted[genome].add(gene)
-					result_handle.write(hog + '\t' + '\t'.join(printlist) + '\n')
+		with open(result_file, 'w') as result_handle:
+			with open(n0_file) as n0f:
+				for i, line in enumerate(n0f):
+					line = line.strip('\n')
+					ls = line.split('\t')
+					if i == 0:
+						genomes = ls[3:]
+						result_handle.write('Orthogroup\t' + '\t'.join(genomes) + '\n')
+					else:
+						hog = ls[0].split('N0.')[1]
+						og = ls[1]
+						printlist = []
+						for j, gs in enumerate(ls[3:]):
+							genome = genomes[j]
+							gss = set(gs.split(', '))
+							gss_with_missing = gss.union(hog_missing_to_add[hog][genome]) 
+							printlist.append(', '.join(sorted(gss_with_missing)))
+							for gene in gss_with_missing:
+								genome_genes_accounted[genome].add(gene)
+						result_handle.write(hog + '\t' + '\t'.join(printlist) + '\n')
 		
-		genomes_sf = []
-		with open(singletons_file) as osf:
-			for i, line in enumerate(osf):
-				line = line.strip('\n')
-				ls = line.split('\t')
-				if i == 0:
-					genomes_sf = ls[1:]
-				else:
-					for j, gs in enumerate(ls[1:]):
-						genome = genomes_sf[j]
-						for gene in gs.split(', '):
-							genome_genes_accounted[genome].add(gene)
-					result_handle.write(line + '\n')
+			genomes_sf = []
+			with open(singletons_file) as osf:
+				for i, line in enumerate(osf):
+					line = line.strip('\n')
+					ls = line.split('\t')
+					if i == 0:
+						genomes_sf = ls[1:]
+					else:
+						for j, gs in enumerate(ls[1:]):
+							genome = genomes_sf[j]
+							for gene in gs.split(', '):
+								genome_genes_accounted[genome].add(gene)
+						result_handle.write(line + '\n')
 
-		genomes_mf = []
-		asof_index = 0
-		with open(main_file) as omf:
-			for i, line in enumerate(omf):
-				line = line.strip('\n')
-				ls = line.split('\t')
-				if i == 0:
-					genomes_mf = ls[1:]
-				else:
-					og = ls[0]
-					printlist = [og]
-					value_count = 0
-					for j, gs in enumerate(ls[1:]):
-						genome = genomes_mf[j]
-						for gene in gs.split(', '):
-							if not gene in genome_genes_accounted[genome]:
-								asof_name = 'ASOF' + determineAsofName(asof_index)	
-								printlist = [asof_name]
-								for gen in genomes_mf:
-									if gen == genome:
-										printlist.append(gene)
-									else:
-										printlist.append('')
-								result_handle.write('\t'.join(printlist) + '\n')
-								asof_index += 1
-		result_handle.close()
+			genomes_mf = []
+			asof_index = 0
+			with open(main_file) as omf:
+				for i, line in enumerate(omf):
+					line = line.strip('\n')
+					ls = line.split('\t')
+					if i == 0:
+						genomes_mf = ls[1:]
+					else:
+						og = ls[0]
+						printlist = [og]
+						value_count = 0
+						for j, gs in enumerate(ls[1:]):
+							genome = genomes_mf[j]
+							for gene in gs.split(', '):
+								if not gene in genome_genes_accounted[genome]:
+									asof_name = 'ASOF' + determineAsofName(asof_index)	
+									printlist = [asof_name]
+									for gen in genomes_mf:
+										if gen == genome:
+											printlist.append(gene)
+										else:
+											printlist.append('')
+									result_handle.write('\t'.join(printlist) + '\n')
+									asof_index += 1
 
 		assert (genomes == genomes_mf and genomes == genomes_sf)
 		assert (os.path.isfile(result_file))
 	except Exception as e:
 		logObject.error("Problem with running OrthoFinder2 cmd: %s." % ' '.join(orthofinder_cmd))
 		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
+		raise RuntimeError("Problem with running OrthoFinder2 cmd: %s." % ' '.join(orthofinder_cmd)) from e
 	return result_file
 
 
@@ -1361,63 +1429,62 @@ def runOrthoFinder2FullFungal(prot_directory, orthofinder_outdir, run_msa, logOb
 			[prot_directory + 'OrthoFinder/' + f for f in os.listdir(prot_directory + 'OrthoFinder/') if
 			 f.startswith('Results')][0]) + '/'
 
-		os.system('mv %s %s' % (tmp_orthofinder_dir, orthofinder_outdir))
+		shutil.move(tmp_orthofinder_dir, orthofinder_outdir)
 		n0_file = orthofinder_outdir + 'Phylogenetic_Hierarchical_Orthogroups/N0.tsv'
 		
-		result_handle = open(result_file, 'w')
+		with open(result_file, 'w') as result_handle:
 
-		hog_ids = set([])
-		hog_prots = set([])
-		genomes = []
-		with open(n0_file) as n0f:
-			for i, line in enumerate(n0f):
-				line = line.strip('\n')
-				ls = line.split('\t')
-				if i == 0:
-					genomes = ls[3:]
-					result_handle.write('Orthogroup\t' + '\t'.join(genomes) + '\n')
-				else:
-					hog = ls[0].split('N0.')[1]
-					hog_ids.add(int(hog.split('HOG')[1]))
-					result_handle.write('\t'.join([hog] + ls[3:]) + '\n')
-					for lts in ls[3:]:
-						for lt in lts.split(', '):
-							if lt.strip() != '':
-								hog_prots.add(lt)
+			hog_ids = set([])
+			hog_prots = set([])
+			genomes = []
+			with open(n0_file) as n0f:
+				for i, line in enumerate(n0f):
+					line = line.strip('\n')
+					ls = line.split('\t')
+					if i == 0:
+						genomes = ls[3:]
+						result_handle.write('Orthogroup\t' + '\t'.join(genomes) + '\n')
+					else:
+						hog = ls[0].split('N0.')[1]
+						hog_ids.add(int(hog.split('HOG')[1]))
+						result_handle.write('\t'.join([hog] + ls[3:]) + '\n')
+						for lts in ls[3:]:
+							for lt in lts.split(', '):
+								if lt.strip() != '':
+									hog_prots.add(lt)
 
-		hog_id_iter = max(hog_ids) + 1
-		for prot_file in os.listdir(prot_directory):
-			if not os.path.isfile(prot_directory + prot_file) or not prot_file.endswith('.faa'): continue
-			genome_id = '.faa'.join(prot_file.split('.faa')[:-1])
-			with open(prot_directory + prot_file) as opf:
-				for rec in SeqIO.parse(opf, 'fasta'):
-					if not rec.id in hog_prots:
-						hog_id_iter_str = 'HOG'
-						if (hog_id_iter) < 10:
-							hog_id_iter_str += '00000'+str(hog_id_iter)
-						elif (hog_id_iter) < 100:
-							hog_id_iter_str += '0000'+str(hog_id_iter)
-						elif (hog_id_iter) < 1000:
-							hog_id_iter_str += '000'+str(hog_id_iter)
-						elif (hog_id_iter) < 10000:
-							hog_id_iter_str += str(hog_id_iter)
-						elif (hog_id_iter) < 100000:
-							hog_id_iter_str += str(hog_id_iter)
-						else:
-							hog_id_iter_str += str(hog_id_iter)
-						printlist = [hog_id_iter_str]
-						hog_id_iter += 1
-						for genome_iter in genomes:
-							if genome_id == genome_iter:
-								printlist.append(rec.id)
+			hog_id_iter = max(hog_ids) + 1
+			for prot_file in os.listdir(prot_directory):
+				if not os.path.isfile(prot_directory + prot_file) or not prot_file.endswith('.faa'): continue
+				genome_id = '.faa'.join(prot_file.split('.faa')[:-1])
+				with open(prot_directory + prot_file) as opf:
+					for rec in SeqIO.parse(opf, 'fasta'):
+						if not rec.id in hog_prots:
+							hog_id_iter_str = 'HOG'
+							if (hog_id_iter) < 10:
+								hog_id_iter_str += '00000'+str(hog_id_iter)
+							elif (hog_id_iter) < 100:
+								hog_id_iter_str += '0000'+str(hog_id_iter)
+							elif (hog_id_iter) < 1000:
+								hog_id_iter_str += '000'+str(hog_id_iter)
+							elif (hog_id_iter) < 10000:
+								hog_id_iter_str += str(hog_id_iter)
+							elif (hog_id_iter) < 100000:
+								hog_id_iter_str += str(hog_id_iter)
 							else:
-								printlist.append('')
-						result_handle.write('\t'.join(printlist) + '\n')	
-		result_handle.close()
+								hog_id_iter_str += str(hog_id_iter)
+							printlist = [hog_id_iter_str]
+							hog_id_iter += 1
+							for genome_iter in genomes:
+								if genome_id == genome_iter:
+									printlist.append(rec.id)
+								else:
+									printlist.append('')
+							result_handle.write('\t'.join(printlist) + '\n')	
 	except Exception as e:
 		logObject.error("Problem with running OrthoFinder2 cmd: %s." % ' '.join(orthofinder_cmd))
 		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
+		raise RuntimeError("Problem with running OrthoFinder2 cmd: %s." % ' '.join(orthofinder_cmd)) from e
 	return result_file
 
 
@@ -1447,23 +1514,22 @@ def runOrthoFinder2(prot_directory, orthofinder_outdir, logObject, threads=1):
 		tmp_orthofinder_dir = os.path.abspath(
 			[prot_directory + 'OrthoFinder/' + f for f in os.listdir(prot_directory + 'OrthoFinder/') if
 			 f.startswith('Results')][0]) + '/'
-		os.system('mv %s %s' % (tmp_orthofinder_dir, orthofinder_outdir))
+		shutil.move(tmp_orthofinder_dir, orthofinder_outdir)
 		main_file = orthofinder_outdir + 'Orthogroups/Orthogroups.tsv'
 		singletons_file = orthofinder_outdir + 'Orthogroups/Orthogroups_UnassignedGenes.tsv'
-		result_handle = open(result_file, 'w')
-		with open(main_file) as omf:
-			for line in omf:
-				result_handle.write(line)
-		with open(singletons_file) as osf:
-			for i, line in enumerate(osf):
-				if i == 0: continue
-				result_handle.write(line)
-		result_handle.close()
+		with open(result_file, 'w') as result_handle:
+			with open(main_file) as omf:
+				for line in omf:
+					result_handle.write(line)
+			with open(singletons_file) as osf:
+				for i, line in enumerate(osf):
+					if i == 0: continue
+					result_handle.write(line)
 		assert (os.path.isfile(result_file))
 	except Exception as e:
 		logObject.error("Problem with running OrthoFinder2 cmd: %s." % ' '.join(orthofinder_cmd))
 		logObject.error(traceback.format_exc())
-		raise RuntimeError(traceback.format_exc())
+		raise RuntimeError("Problem with running OrthoFinder2 cmd: %s." % ' '.join(orthofinder_cmd)) from e
 	return result_file
 
 def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, logObject, threads=1, panaroo_options='--clean-mode moderate --remove-invalid-genes'):
@@ -1511,7 +1577,9 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 		except Exception as e:
 			msg = 'Issues creating Prokka-like GFF files for Panaroo.'
 			sys.stderr.write(msg + '\n')
+			sys.stderr.write(traceback.format_exc() + '\n')
 			logObject.error(msg)
+			logObject.error(traceback.format_exc())
 			sys.exit(1)
 
 		panaroo_cmd = ['panaroo', '-t', str(threads), panaroo_options, '-i', ' '.join(panaroo_inputs), '-o', results_directory]
@@ -1524,55 +1592,56 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 		except Exception as e:
 			msg = 'Issue running Panaroo with the following command: %s' % ' '.join(panaroo_cmd)
 			sys.stderr.write(msg + '\n')
+			sys.stderr.write(traceback.format_exc() + '\n')
 			logObject.error(msg)
+			logObject.error(traceback.format_exc())
 			sys.exit(1)
 
 		main_ortho_file = results_directory + 'gene_presence_absence.csv'
 		
-		result_handle = open(result_file, 'w')
-		clustered_lts = set([])
-		cds_iter = 1
-		genomes = []
-		with open(main_ortho_file) as omof:
-			for i, line in enumerate(omof):
-				line = line.strip('\n')
-				ls = line.split(',')
-				if i == 0: 
-					result_handle.write('\t'.join(['OrthoGroup'] + ls[3:]) + '\n')
-					genomes = ls[3:]
-				else:
-					og_id = 'OG' + determineAsofName(cds_iter)
-					for lts in ls[3:]:
-						for lt in lts.split(';'):
-							lt = lt.strip()
-							if lt != '': clustered_lts.add(lt)
-					result_handle.write('\t'.join([og_id] + [', '.join(x.split(';')) for x in ls[3:]]) + '\n')
-					cds_iter += 1
+		with open(result_file, 'w') as result_handle:
+			clustered_lts = set([])
+			cds_iter = 1
+			genomes = []
+			with open(main_ortho_file) as omof:
+				for i, line in enumerate(omof):
+					line = line.strip('\n')
+					ls = line.split(',')
+					if i == 0: 
+						result_handle.write('\t'.join(['OrthoGroup'] + ls[3:]) + '\n')
+						genomes = ls[3:]
+					else:
+						og_id = 'OG' + determineAsofName(cds_iter)
+						for lts in ls[3:]:
+							for lt in lts.split(';'):
+								lt = lt.strip()
+								if lt != '': clustered_lts.add(lt)
+						result_handle.write('\t'.join([og_id] + [', '.join(x.split(';')) for x in ls[3:]]) + '\n')
+						cds_iter += 1
 		
-		for sample in sample_genomes:
-			gbk = sample_genomes[sample]
-			with open(gbk) as ogbk:
-				for rec in SeqIO.parse(ogbk, 'genbank'):
-					for feat in rec.features:
-						if not feat.type == 'CDS': continue
-						try:
-							lt = feat.qualifiers.get('locus_tag')[0]
-						except Exception as e:
-							msg = f'Warning: no locus tag for feature {feat.type} in GenBank file {gbk}. Skipping.'
-							sys.stderr.write(msg + '\n')
-							continue
+			for sample in sample_genomes:
+				gbk = sample_genomes[sample]
+				with open(gbk) as ogbk:
+					for rec in SeqIO.parse(ogbk, 'genbank'):
+						for feat in rec.features:
+							if not feat.type == 'CDS': continue
+							try:
+								lt = feat.qualifiers.get('locus_tag')[0]
+							except Exception as e:
+								msg = f'Warning: no locus tag for feature {feat.type} in GenBank file {gbk}. Skipping.'
+								sys.stderr.write(msg + '\n')
+								continue
 
-						if not lt in clustered_lts:
-							og_id = 'OG' + determineAsofName(cds_iter)
-							cds_iter += 1
-							printlist = [og_id]
-							for genome in genomes:
-								if genome == sample:
-									printlist.append(lt)
-								else:
-									printlist.append('')
-							result_handle.write('\t'.join(printlist) + '\n')
-		result_handle.close()
+							if not lt in clustered_lts:
+								og_id = 'OG' + determineAsofName(cds_iter)
+								cds_iter += 1
+								printlist = [og_id]
+								for genome in genomes:
+									if genome == sample:
+										printlist.append(lt)
+									else:
+										printlist.append('')
+								result_handle.write('\t'.join(printlist) + '\n')
 
 		assert (os.path.isfile(result_file))
 	except Exception as e:
@@ -1631,50 +1700,49 @@ def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, resu
 
 		# Reformat to the standard lsaBGC-Pan orthogroup by sample matrix. bofasa should report singletons, but
 		# any CDS features not accounted for (e.g. very short proteins filtered by bofasa) are added as singletons.
-		result_handle = open(result_file, 'w')
-		clustered_lts = set([])
-		genomes = []
-		cds_iter = 1
-		with open(bofasa_ogs_file) as obof:
-			for i, line in enumerate(obof):
-				line = line.rstrip('\n')
-				ls = line.split('\t')
-				if i == 0:
-					genomes = ls[1:]
-					result_handle.write('\t'.join(['Orthogroup'] + genomes) + '\n')
-				else:
-					for lts in ls[1:]:
-						for lt in lts.split(', '):
-							lt = lt.strip()
-							if lt != '': clustered_lts.add(lt)
-					result_handle.write('\t'.join(['OG' + determineAsofName(cds_iter)] + ls[1:]) + '\n')
-					cds_iter += 1
+		with open(result_file, 'w') as result_handle:
+			clustered_lts = set([])
+			genomes = []
+			cds_iter = 1
+			with open(bofasa_ogs_file) as obof:
+				for i, line in enumerate(obof):
+					line = line.rstrip('\n')
+					ls = line.split('\t')
+					if i == 0:
+						genomes = ls[1:]
+						result_handle.write('\t'.join(['Orthogroup'] + genomes) + '\n')
+					else:
+						for lts in ls[1:]:
+							for lt in lts.split(', '):
+								lt = lt.strip()
+								if lt != '': clustered_lts.add(lt)
+						result_handle.write('\t'.join(['OG' + determineAsofName(cds_iter)] + ls[1:]) + '\n')
+						cds_iter += 1
 
-		for sample in sample_genomes:
-			if not sample in genomes:
-				raise RuntimeError(f'Sample {sample} not found as a column in bofasa results: {bofasa_ogs_file}')
-			gbk = sample_genomes[sample]
-			with open(gbk) as ogbk:
-				for rec in SeqIO.parse(ogbk, 'genbank'):
-					for feat in rec.features:
-						if not feat.type == 'CDS': continue
-						try:
-							lt = feat.qualifiers.get('locus_tag')[0]
-						except Exception as e:
-							msg = f'Warning: no locus tag for feature {feat.type} in GenBank file {gbk}. Skipping.'
-							sys.stderr.write(msg + '\n')
-							continue
+			for sample in sample_genomes:
+				if not sample in genomes:
+					raise RuntimeError(f'Sample {sample} not found as a column in bofasa results: {bofasa_ogs_file}')
+				gbk = sample_genomes[sample]
+				with open(gbk) as ogbk:
+					for rec in SeqIO.parse(ogbk, 'genbank'):
+						for feat in rec.features:
+							if not feat.type == 'CDS': continue
+							try:
+								lt = feat.qualifiers.get('locus_tag')[0]
+							except Exception as e:
+								msg = f'Warning: no locus tag for feature {feat.type} in GenBank file {gbk}. Skipping.'
+								sys.stderr.write(msg + '\n')
+								continue
 
-						if not lt in clustered_lts:
-							printlist = ['OG' + determineAsofName(cds_iter)]
-							cds_iter += 1
-							for genome in genomes:
-								if genome == sample:
-									printlist.append(lt)
-								else:
-									printlist.append('')
-							result_handle.write('\t'.join(printlist) + '\n')
-		result_handle.close()
+							if not lt in clustered_lts:
+								printlist = ['OG' + determineAsofName(cds_iter)]
+								cds_iter += 1
+								for genome in genomes:
+									if genome == sample:
+										printlist.append(lt)
+									else:
+										printlist.append('')
+								result_handle.write('\t'.join(printlist) + '\n')
 
 		assert (os.path.isfile(result_file))
 	except Exception as e:
@@ -1686,6 +1754,145 @@ def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, resu
 		sys.exit(1)
 	return result_file
 
+def processPrecomputedGECCOResults(gecco_precomputed_dir, sample_genomes, gecco_results_dir, logObject):
+	"""
+	Definition:
+	Function to process precomputed GECCO results (e.g. from nf-core/funcscan) for use in lsaBGC-Pan. Only the BGC
+	coordinates and types (from the *.clusters.tsv files) and the Pfam domain annotations (from the cluster GenBank
+	files) are used. BGC GenBank files are recreated from the lsaBGC-Pan gene-called full genome GenBank files so that
+	CDS features and locus tags are consistent with the rest of the analysis.
+
+	The precomputed GECCO directory is expected to have one subdirectory per sample, named the same as the genome
+	FASTA file (minus extension) provided to lsaBGC-Pan, each containing GECCO "run" results for that same FASTA.
+	********************************************************************************************************************
+	Parameters:
+	- gecco_precomputed_dir: Directory with per-sample subdirectories of precomputed GECCO results.
+	- sample_genomes: Dictionary mapping sample names to lsaBGC-Pan's gene-called full genome GenBank files.
+	- gecco_results_dir: Directory where recreated BGC GenBank files will be written (in per-sample subdirectories).
+	- logObject: A python logging object.
+	********************************************************************************************************************
+	Returns:
+	- gecco_bgc_locations: List of BGC location information lists: [bgc_file, sample, scaffold, start, end,
+	                       bgc_length, dist_to_edge, 'gecco'].
+	********************************************************************************************************************
+	"""
+	gecco_bgc_locations = []
+	try:
+		# map samples to precomputed GECCO subdirectories
+		sample_to_gecco_dir = {}
+		for sd in os.listdir(gecco_precomputed_dir):
+			subdir = gecco_precomputed_dir + sd + '/'
+			if not os.path.isdir(subdir): continue
+			# mirror the sample naming used by lsaBGC-Pan for genome FASTA files with troublesome characters.
+			sample = sd
+			for tc in [' ', '\t', ',', '|', '\\']:
+				sample = sample.replace(tc, '_')
+			sample = cleanUpSampleName(sample)
+			if sample in sample_genomes:
+				sample_to_gecco_dir[sample] = subdir
+			else:
+				msg = 'Warning: precomputed GECCO results subdirectory %s does not match any input genome sample name - ignoring it.' % subdir
+				sys.stderr.write(msg + '\n')
+				logObject.warning(msg)
+
+		missing_samples = sorted([s for s in sample_genomes if not s in sample_to_gecco_dir])
+		if len(missing_samples) > 0:
+			raise RuntimeError('No precomputed GECCO results subdirectory found for the following samples (subdirectory names must match genome FASTA file names minus extension): %s' % ', '.join(missing_samples))
+
+		for sample in sorted(sample_genomes):
+			gecco_dir = sample_to_gecco_dir[sample]
+			cluster_tsvs = [f for f in os.listdir(gecco_dir) if f.endswith('.clusters.tsv')]
+			if len(cluster_tsvs) != 1:
+				raise RuntimeError('Expected exactly one *.clusters.tsv file in precomputed GECCO results subdirectory %s, found %d.' % (gecco_dir, len(cluster_tsvs)))
+			cluster_tsv = gecco_dir + cluster_tsvs[0]
+
+			scaffold_recs = {}
+			with open(sample_genomes[sample]) as ogg:
+				for rec in SeqIO.parse(ogg, 'genbank'):
+					scaffold_recs[rec.id] = rec
+
+			sample_outdir = gecco_results_dir + sample + '/'
+			setupReadyDirectory([sample_outdir])
+
+			with open(cluster_tsv) as octf:
+				header = []
+				for i, line in enumerate(octf):
+					ls = line.rstrip('\n').split('\t')
+					if i == 0:
+						header = ls
+						continue
+					row = dict(zip(header, ls))
+					scaff, bgc_id = ls[0], ls[1]
+					start_coord, end_coord = sorted([int(ls[2]), int(ls[3])])
+					bgc_type = row.get('type', 'Unknown')
+					if not scaff in scaffold_recs:
+						raise RuntimeError('Scaffold %s (from %s) not found in genome for sample %s - please make sure GECCO was run on the same genome FASTA file provided to lsaBGC-Pan.' % (scaff, cluster_tsv, sample))
+					genome_rec = scaffold_recs[scaff]
+					scaff_seq = str(genome_rec.seq).upper()
+
+					# determine Pfam domain annotations and confirm sequence agreement using GECCO cluster GenBank
+					domain_features = []
+					gecco_gbk = gecco_dir + bgc_id + '.gbk'
+					if os.path.isfile(gecco_gbk):
+						gecco_rec = SeqIO.read(gecco_gbk, 'genbank')
+						gecco_seq = str(gecco_rec.seq).upper()
+						window_start = max(0, start_coord - 1 - 10)
+						idx = scaff_seq.find(gecco_seq, window_start, min(len(scaff_seq), end_coord + 10))
+						if idx == -1:
+							raise RuntimeError('Sequence of GECCO BGC %s does not match the expected region (%s:%d-%d) in the genome for sample %s - please make sure GECCO was run on the same genome FASTA file provided to lsaBGC-Pan.' % (gecco_gbk, scaff, start_coord, end_coord, sample))
+						start_coord = idx + 1
+						end_coord = idx + len(gecco_seq)
+						for feat in gecco_rec.features:
+							if feat.type == 'misc_feature':
+								domain_features.append(feat)
+					else:
+						msg = 'Warning: GECCO BGC GenBank %s not found - Pfam domain annotations will not be available for this BGC.' % gecco_gbk
+						sys.stderr.write(msg + '\n')
+						logObject.warning(msg)
+
+					# extend boundaries to fully encompass CDS features from lsaBGC-Pan gene calling which overlap the
+					# region partially (gene calls can differ slightly from GECCO's internal gene calling).
+					cds_features = []
+					region_start, region_end = start_coord - 1, end_coord
+					for feat in genome_rec.features:
+						if feat.type != 'CDS': continue
+						fstart, fend = int(feat.location.start), int(feat.location.end)
+						if fend <= start_coord - 1 or fstart >= end_coord: continue
+						cds_features.append(feat)
+						region_start = min(region_start, fstart)
+						region_end = max(region_end, fend)
+
+					if len(cds_features) == 0:
+						msg = 'Warning: no CDS features from lsaBGC-Pan gene calling found within GECCO BGC %s for sample %s - skipping it.' % (bgc_id, sample)
+						sys.stderr.write(msg + '\n')
+						logObject.warning(msg)
+						continue
+
+					domain_shift = (start_coord - 1) - region_start
+					new_rec = SeqRecord(genome_rec.seq[region_start:region_end], id=scaff, name=scaff[:16], description='GECCO BGC %s recreated by lsaBGC-Pan' % bgc_id)
+					new_rec.annotations['molecule_type'] = 'DNA'
+					new_rec.annotations['structured_comment'] = OrderedDict([('GECCO-Data', OrderedDict([('cluster_type', bgc_type), ('source', 'precomputed GECCO results processed by lsaBGC-Pan')]))])
+					for feat in sorted(cds_features, key=lambda x: int(x.location.start)):
+						new_rec.features.append(feat._shift(-region_start))
+					for feat in domain_features:
+						new_rec.features.append(feat._shift(domain_shift))
+
+					bgc_file = sample_outdir + bgc_id + '.gbk'
+					SeqIO.write(new_rec, bgc_file, 'genbank')
+
+					bgc_start, bgc_end = region_start + 1, region_end
+					bgc_length = bgc_end - bgc_start + 1
+					dist_to_edge = min([bgc_start, len(scaff_seq) - bgc_end])
+					gecco_bgc_locations.append([bgc_file, sample, scaff, bgc_start, bgc_end, bgc_length, dist_to_edge, 'gecco'])
+	except Exception as e:
+		msg = 'Issues processing precomputed GECCO results.'
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		logObject.error(msg)
+		logObject.error(traceback.format_exc())
+		sys.exit(1)
+	return gecco_bgc_locations
+
 def setupReadyDirectory(directories):
 	"""
 	Simple function to (re-)create directories provided as a list.  
@@ -1694,17 +1901,17 @@ def setupReadyDirectory(directories):
 		assert (type(directories) is list)
 		for d in directories:
 			if os.path.isdir(d):
-				os.system('rm -rf %s' % d)
-			os.system('mkdir %s' % d)
+				shutil.rmtree(d)
+			os.makedirs(d)
 	except Exception as e:
-		raise RuntimeError(traceback.format_exc())
+		raise RuntimeError('Issue setting up directories: %s' % str(directories)) from e
 
 
 def p_adjust_bh(p):
 	"""
 	Benjamini-Hochberg p-value correction for multiple hypothesis testing.
 	"""
-	p = np.asfarray(p)
+	p = np.asarray(p, dtype=float)
 	by_descend = p.argsort()[::-1]
 	by_orig = by_descend.argsort()
 	steps = float(len(p)) / np.arange(len(p), 0, -1)
@@ -1724,12 +1931,11 @@ def is_newick(newick):
 
 def is_fastq(fastq):
 	"""
-	Function to validate if FASTA file is correctly formatted.
+	Function to validate if FASTQ file is correctly formatted.
 	"""
 	try:
 		with open(fastq) as of:
-			SeqIO.parse(of, 'fastq')
-		return True
+			return next(SeqIO.parse(of, 'fastq'), None) is not None
 	except Exception as e:
 		return False
 
@@ -1741,28 +1947,26 @@ def is_fasta(fasta):
 	try:
 		if fasta.endswith('.gz'):
 			with gzip.open(fasta, 'rt') as ogf:
-				SeqIO.parse(ogf, 'fasta')
+				return next(SeqIO.parse(ogf, 'fasta'), None) is not None
 		else:
 			with open(fasta) as of:
-				SeqIO.parse(of, 'fasta')
-		return True
+				return next(SeqIO.parse(of, 'fasta'), None) is not None
 	except Exception as e:
 		return False
 
 
 def is_genbank(gbk):
 	"""
-	Function to check in Genbank file is correctly formatted.
+	Function to check if Genbank file is correctly formatted.
 	"""
 	try:
 		assert (gbk.endswith('.gbk') or gbk.endswith('.gbff') or gbk.endswith('.gbk.gz') or gbk.endswith('.gbff.gz'))
 		if gbk.endswith('.gz'):
 			with gzip.open(gbk, 'rt') as ogf:
-				SeqIO.parse(ogf, 'genbank')
+				return next(SeqIO.parse(ogf, 'genbank'), None) is not None
 		else:
 			with open(gbk) as of:
-				SeqIO.parse(of, 'genbank')
-		return True
+				return next(SeqIO.parse(of, 'genbank'), None) is not None
 	except Exception as e:
 		return False
 	
@@ -1816,11 +2020,10 @@ def logParametersToFile(parameter_file, parameter_names, parameter_values):
 	"""
 	Function to log parameters of executable program to text file.
 	"""
-	parameter_handle = open(parameter_file, 'w')
-	for i, pv in enumerate(parameter_values):
-		pn = parameter_names[i]
-		parameter_handle.write(pn + ': ' + str(pv) + '\n')
-	parameter_handle.close()
+	with open(parameter_file, 'w') as parameter_handle:
+		for i, pv in enumerate(parameter_values):
+			pn = parameter_names[i]
+			parameter_handle.write(pn + ': ' + str(pv) + '\n')
 
 
 def logParametersToObject(logObject, parameter_names, parameter_values):
@@ -1910,14 +2113,14 @@ def castToNumeric(x):
 def loadTableInPandaDataFrame(input_file, numeric_columns):
 	"""
 	Description:
-	This function formats reads a TSV file and stores it as a pandas dataframe.
+	This function reads a TSV file and stores it as a pandas dataframe.
 	********************************************************************************************************************
 	Parameters:
 	- input_file: The input TSV file, with first row corresponding to the header.
 	- numeric_columns: Set of column names which should have numeric data.
 	********************************************************************************************************************
 	Returns:
-	- panda_df: A pandas DataFrame object reprsentation of the input TSV file.
+	- panda_df: A pandas DataFrame object representation of the input TSV file.
 	********************************************************************************************************************
 	"""
 	import pandas as pd
@@ -1947,7 +2150,7 @@ def loadTableInPandaDataFrame(input_file, numeric_columns):
 	return panda_df
 
 def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_results_dir, zol_high_qual_flag,
-							     mibig_dir, recon_result_file, recon_og_result_file, recon_pop_color_file,
+								 mibig_dir, recon_result_file, recon_og_result_file, recon_pop_color_file,
 								 sociate_result_file, final_spreadsheet_xlsx, scratch_dir, logObject):
 	"""
 	********************************************************************************************************************
@@ -1966,10 +2169,10 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 	                     are distributed in different populations and GCF contexts.
 	- recon_og_result_file: The secondary major result file from lsaBGC-Recon which shows a matrix of orthogroup 
 	                        carriage across samples.
-	- recon_pop_color_file: The population coloring determined in lsaBGG-Recon to eventually color the spreadsheet 
+	- recon_pop_color_file: The population coloring determined in lsaBGC-Recon to eventually color the spreadsheet 
 	                        using. Currently is not used!
 	- sociate_result_file: The major result file from lsaBGC-Sociate showing the results of finding associated/
-	                       disocciated orthogroups and GCFs with focal GCFs.
+	                       dissociated orthogroups and GCFs with focal GCFs.
 	- final_spreadsheet_xlsx: The final consolidated spreadsheet path; to be made in the function.
 	- scratch_dir: A scratch space to write temporary/intermediate files.
 	- logObject: A python logging object.
@@ -2065,49 +2268,48 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			gcf = f.split('.txt')[0]
 			if not os.path.isfile(gcf_comp_cons_file): continue			
 			with open(gcf_comp_cons_file) as ogrf:
-				for i, line in enumerate(ogrf):
-					if i == 0: continue
+				for line in ogrf:
 					line = line.strip()
+					if not line: continue
 					ls = line.split('\t')
 					og = ls[0]
 					cons = ls[1]
 					comp_cons[gcf][og] = cons
 
-		zctf_handle = open(zol_combined_tsv_file, 'w')
-		zctf_handle.write('\t'.join(zol_sheet_header) + '\n')
-		num_rows = 1
-		# Dynamically parse zol headers and rows to avoid hard-coded indices
-		zol_header_from_report = None
-		for gcf in os.listdir(zol_full_dir):
-			gcf_result_file = zol_full_dir + gcf + '/Final_Results/Consolidated_Report.tsv'
-			if not os.path.isfile(gcf_result_file):
-				continue
-			with open(gcf_result_file) as ogrf:
-				for i, line in enumerate(ogrf):
-					line = line.strip('\n')
-					if i == 0:
-						zol_header_from_report = line.split('\t')
-						continue
-					ls = line.split('\t')
-					col_to_val = {}
-					for ci, cv in enumerate(ls):
-						if zol_header_from_report is not None and ci < len(zol_header_from_report):
-							col_to_val[zol_header_from_report[ci]] = cv
+		with open(zol_combined_tsv_file, 'w') as zctf_handle:
+			zctf_handle.write('\t'.join(zol_sheet_header) + '\n')
+			num_rows = 1
+			# Dynamically parse zol headers and rows to avoid hard-coded indices
+			zol_header_from_report = None
+			for gcf in os.listdir(zol_full_dir):
+				gcf_result_file = zol_full_dir + gcf + '/Final_Results/Consolidated_Report.tsv'
+				if not os.path.isfile(gcf_result_file):
+					continue
+				with open(gcf_result_file) as ogrf:
+					for i, line in enumerate(ogrf):
+						line = line.strip('\n')
+						if i == 0:
+							zol_header_from_report = line.split('\t')
+							continue
+						ls = line.split('\t')
+						col_to_val = {}
+						for ci, cv in enumerate(ls):
+							if zol_header_from_report is not None and ci < len(zol_header_from_report):
+								col_to_val[zol_header_from_report[ci]] = cv
 
-					og_id = col_to_val.get('Ortholog Group (OG) ID', 'NA')
-					row_vals = []
-					for h in zol_sheet_header:
-						if h == 'GCF ID':
-							row_vals.append(gcf)
-						elif h == 'Ortholog Group (OG) ID':
-							row_vals.append(og_id)
-						elif h == 'Proportion of Complete Gene Cluster Instances with OG':
-							row_vals.append(comp_cons[gcf][og_id])
-						else:
-							row_vals.append(col_to_val.get(h, 'NA'))
-					zctf_handle.write('\t'.join([str(x) for x in row_vals]) + '\n')
-					num_rows += 1
-		zctf_handle.close()
+						og_id = col_to_val.get('Ortholog Group (OG) ID', 'NA')
+						row_vals = []
+						for h in zol_sheet_header:
+							if h == 'GCF ID':
+								row_vals.append(gcf)
+							elif h == 'Ortholog Group (OG) ID':
+								row_vals.append(og_id)
+							elif h == 'Proportion of Complete Gene Cluster Instances with OG':
+								row_vals.append(comp_cons[gcf][og_id])
+							else:
+								row_vals.append(col_to_val.get(h, 'NA'))
+						zctf_handle.write('\t'.join([str(x) for x in row_vals]) + '\n')
+						num_rows += 1
 
 		zr_numeric_columns = set([
 			'Proportion of Total Gene Clusters with OG',
@@ -2278,18 +2480,17 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 
 		mb_combined_tsv_file = scratch_dir + 'mibig_map_results.tsv'
 		mb_header = ['GCF ID', 'MIBiG BGC ID', 'GCF OG ID', 'MIBiG Protein Matching', 'MIBiG Compound(s)']
-		mb_outf = open(mb_combined_tsv_file, 'w')
-		mb_outf.write('\t'.join(mb_header) + '\n')
-		for gcf in os.listdir(mibig_dir):
-			map_file = mibig_dir + gcf + '/GCF_to_MIBiG_Relations.txt'
-			if not os.path.isfile(map_file): continue
-			with open(map_file) as omf:
-				for i, line in enumerate(omf):
-					if i == 0: continue
-					line = line.strip('\n')
-					ls = line.split('\t')
-					mb_outf.write('\t'.join(ls + [' | '.join(mibig_bgc_compounds[ls[1]])]) + '\n')
-		mb_outf.close()
+		with open(mb_combined_tsv_file, 'w') as mb_outf:
+			mb_outf.write('\t'.join(mb_header) + '\n')
+			for gcf in os.listdir(mibig_dir):
+				map_file = mibig_dir + gcf + '/GCF_to_MIBiG_Relations.txt'
+				if not os.path.isfile(map_file): continue
+				with open(map_file) as omf:
+					for i, line in enumerate(omf):
+						if i == 0: continue
+						line = line.strip('\n')
+						ls = line.split('\t')
+						mb_outf.write('\t'.join(ls + [' | '.join(mibig_bgc_compounds[ls[1]])]) + '\n')
 
 		mb_data = loadTableInPandaDataFrame(mb_combined_tsv_file, set([]))
 		mb_data.to_excel(writer, sheet_name='lsaBGC-MIBiGMapper Results', index=False, na_rep="NA")
@@ -2319,14 +2520,14 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 		og_numeric_columns = set([])
 		og_non_numeric_columns = set(['sample'])
 
-		num_rows = 1
-		with open(recon_result_file) as orrf:
-			for i, line in enumerate(orrf):
+		num_rows = 0
+		with open(recon_og_result_file) as oorf:
+			for i, line in enumerate(oorf):
 				if i == 0:
 					line = line.strip('\n')
 					colnames = set(line.split('\t'))
 					og_numeric_columns = colnames.difference(og_non_numeric_columns)
-					num_rows += 1
+				num_rows += 1
 		
 		og_data = loadTableInPandaDataFrame(recon_og_result_file, og_numeric_columns)
 		og_data.to_excel(writer, sheet_name='BGC OG by Sample Matrix', index=False, na_rep="NA")
@@ -2338,7 +2539,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 
 		# create lsaBGC-sociate spreadsheet
 		so_numeric_columns = set(['allele frequency', 'frequency in samples with focal GCF', 'frequency in samples without focal GCF','pvalue', 
-					  'phylgoenetically corrected pvalue', 'beta', 'beta-std-err', 'variant_h2'])
+					  'phylogenetically corrected pvalue', 'beta', 'beta-std-err', 'variant_h2'])
 		so_data = loadTableInPandaDataFrame(sociate_result_file, so_numeric_columns)
 		so_data.to_excel(writer, sheet_name='lsaBGC-Sociate Results', index=False, na_rep="NA")
 		so_sheet =  writer.sheets['lsaBGC-Sociate Results']

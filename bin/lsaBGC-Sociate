@@ -40,6 +40,7 @@ import sys
 from time import sleep
 import argparse
 from lsaBGC import util
+from lsaBGC import phyloplot
 import warnings
 import traceback
 from Bio import SeqIO
@@ -50,14 +51,14 @@ import concurrent.futures
 warnings.filterwarnings('ignore')
 
 def create_parser():
-    """ Parse arguments """
-    parser = argparse.ArgumentParser(description="""
+	""" Parse arguments """
+	parser = argparse.ArgumentParser(description="""
 	Program: lsaBGC-Sociate
 	Author: Rauf Salamzade
 	Affiliation: Kalan Lab, UW Madison, Department of Medical Microbiology and Immunology
 
-	This program runs pyseer (Lees, Galardini et al. 2018) to assess co-occurence associations
-    or dissocations between orthogroups found in BGC contexts and other orthogroups found 
+	This program runs pyseer (Lees, Galardini et al. 2018) to assess co-occurrence associations
+    or dissociations between orthogroups found in BGC contexts and other orthogroups found 
     across genomes.                  
     
     Draws inspiration from the software/studies: 
@@ -65,240 +66,233 @@ def create_parser():
       - Study by Bruns et al. 2017
       - Study by Beavan, Domingo-Sananes, and McInerney et al. 2023
       - Study by Mohite et al. 2022
-      - Goldfinder by Gavriildou, Paulitz and Resl et al. 2024     
+      - Goldfinder by Gavriilidou, Paulitz and Resl et al. 2024     
       - Study by Wang, Chen, and Cruz-Morales et al. 2024                                  
     """, formatter_class=argparse.RawTextHelpFormatter)
 
-    parser.add_argument('-l', '--lsabgc_detailed_listing', help='lsaBGC-Pan detailed listing with GCF and population structure information.', required=True)
-    parser.add_argument('-m', '--orthomatrix', help='OrthoFinder/Panaroo/bofasa ortholog by sample matrix.', required=True)
-    parser.add_argument('-o', '--output_directory', help="Output directory.", required=True)
-    parser.add_argument('-vo', '--visual_output_directory', help="Visual output directory.", required=True)
-    parser.add_argument('-s', '--species_phylogeny', help="The species phylogeny in Newick format.", required=True)
-    parser.add_argument('-r', '--report_hits_with_notes', action='store_true', help="Report hits with 'notes'.", required=False, default=False)
-    parser.add_argument('-c', '--threads', type=int, help="Number of threads to use for MCL step [Default is 1].", required=False, default=1)
-    parser.add_argument('-t', '--timeout_time', type=float, help="Timeout for alignments in seconds [Default is 1800].", required=False, default=1800)
-    args = parser.parse_args()
-    return args
+	parser.add_argument('-l', '--lsabgc_detailed_listing', help='lsaBGC-Pan detailed listing with GCF and population structure information.', required=True)
+	parser.add_argument('-m', '--orthomatrix', help='OrthoFinder/Panaroo/bofasa ortholog by sample matrix.', required=True)
+	parser.add_argument('-o', '--output_directory', help="Output directory.", required=True)
+	parser.add_argument('-vo', '--visual_output_directory', help="Visual output directory.", required=True)
+	parser.add_argument('-s', '--species_phylogeny', help="The species phylogeny in Newick format.", required=True)
+	parser.add_argument('-r', '--report_hits_with_notes', action='store_true', help="Report hits with 'notes'.", required=False, default=False)
+	parser.add_argument('-c', '--threads', type=int, help="Number of threads to use [Default is 1].", required=False, default=1)
+	parser.add_argument('-t', '--timeout_time', type=float, help="Timeout for alignments in seconds [Default is 1800].", required=False, default=1800)
+	args = parser.parse_args()
+	return args
 
 def lsaBGC_Sociate():
-    """
+	"""
     Void function which runs primary workflow for program.
     """
 
-    """
+	"""
     PARSE REQUIRED INPUTS
     """
-    myargs = create_parser()
+	myargs = create_parser()
 
-    lsabgc_detailed_listing = os.path.abspath(myargs.lsabgc_detailed_listing)
-    orthofinder_matrix_file = os.path.abspath(myargs.orthomatrix)
-    outdir = os.path.abspath(myargs.output_directory) + '/'
-    viz_outdir = os.path.abspath(myargs.visual_output_directory) + '/'
-    report_hits_with_notes_flag = myargs.report_hits_with_notes
-    species_tree = os.path.abspath(myargs.species_phylogeny) 
+	lsabgc_detailed_listing = os.path.abspath(myargs.lsabgc_detailed_listing)
+	orthofinder_matrix_file = os.path.abspath(myargs.orthomatrix)
+	outdir = os.path.abspath(myargs.output_directory) + '/'
+	viz_outdir = os.path.abspath(myargs.visual_output_directory) + '/'
+	report_hits_with_notes_flag = myargs.report_hits_with_notes
+	species_tree = os.path.abspath(myargs.species_phylogeny) 
 
-    ### vet input files quickly
-    try:
-        assert (os.path.isfile(orthofinder_matrix_file))
-        assert (os.path.isfile(lsabgc_detailed_listing))
-    except Exception as e:
-        raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
+	### vet input files quickly
+	if not (os.path.isfile(orthofinder_matrix_file) and os.path.isfile(lsabgc_detailed_listing)):
+		raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
 
-    if os.path.isdir(outdir):
-        sys.stderr.write("Output directory exists. Overwriting in 5 seconds ...\n ")
-        sleep(5)
+	if os.path.isdir(outdir):
+		sys.stderr.write("Output directory exists. Overwriting in 5 seconds ...\n ")
+		sleep(5)
 
-    util.setupReadyDirectory([outdir, viz_outdir])
+	util.setupReadyDirectory([outdir, viz_outdir])
 
-    """
+	"""
     PARSE OPTIONAL INPUTS
     """
 
-    threads = myargs.threads
-    timeout_time = myargs.timeout_time
+	threads = myargs.threads
+	timeout_time = myargs.timeout_time
 
-    parallel_jobs_4thread = max(math.floor(threads / 4), 1)
-    multi_thread = 4
-    if threads < 4:
-        multi_thread = threads
-        parallel_jobs_4thread = 1
+	parallel_jobs_4thread = max(math.floor(threads / 4), 1)
+	multi_thread = 4
+	if threads < 4:
+		multi_thread = threads
+		parallel_jobs_4thread = 1
 
-    """
+	"""
     START WORKFLOW
     """
-    # create logging object
-    log_file = outdir + 'Progress.log'
-    logObject = util.createLoggerObject(log_file)
-    version_string = util.parseVersion()
-    logObject.info('Running lsaBGC version %s' % version_string)
+	# create logging object
+	log_file = outdir + 'Progress.log'
+	logObject = util.createLoggerObject(log_file)
+	version_string = util.parseVersion()
+	logObject.info('Running lsaBGC version %s' % version_string)
 
-    # Log input arguments and update reference and query FASTA files.
-    logObject.info("Saving parameters for future records.")
-    parameters_file = outdir + 'Parameter_Inputs.txt'
-    parameter_values = [lsabgc_detailed_listing, orthofinder_matrix_file, outdir, species_tree, threads]
-    parameter_names = ["Detailed BGC Information File", "Ortholog by Sample Matrix File", "Output Directory",
-                       "Species Phylogeny", "Threads"]
-    util.logParametersToFile(parameters_file, parameter_names, parameter_values)
-    logObject.info("Done saving parameters!")
+	# Log input arguments and update reference and query FASTA files.
+	logObject.info("Saving parameters for future records.")
+	parameters_file = outdir + 'Parameter_Inputs.txt'
+	parameter_values = [lsabgc_detailed_listing, orthofinder_matrix_file, outdir, species_tree, threads]
+	parameter_names = ["Detailed BGC Information File", "Ortholog by Sample Matrix File", "Output Directory",
+					   "Species Phylogeny", "Threads"]
+	util.logParametersToFile(parameters_file, parameter_names, parameter_values)
+	logObject.info("Done saving parameters!")
 
-    # Step 0: Download pyseer scripts 
-    pyseer_script_dir = outdir + 'pyseer_scripts/'
-    util.setupReadyDirectory([pyseer_script_dir])
+	# Step 0: Download pyseer scripts 
+	pyseer_script_dir = outdir + 'pyseer_scripts/'
+	util.setupReadyDirectory([pyseer_script_dir])
 
-    msg = 'Downloading pyseer scripts count_patterns.py and phylogeny_distance.py'
-    sys.stdout.write(msg + '\n')
-    logObject.info(msg)
-    
-    cp_script = pyseer_script_dir + 'count_patterns.py'
-    pd_script = pyseer_script_dir + 'phylogeny_distance.py'
-    curl_cmd_1 = ['curl', '-L', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/count_patterns.py', '-o', cp_script]
-    curl_cmd_2 = ['curl', '-L', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/phylogeny_distance.py', '-o', pd_script]
-    try:
-        util.runCmdViaSubprocess(curl_cmd_1, logObject=logObject, check_files=[cp_script])
-        util.runCmdViaSubprocess(curl_cmd_2, logObject=logObject, check_files=[pd_script])
-    except Exception as e:
-        msg = 'Had issues downloading pyseer auxiliary scripts!'
-        sys.stderr.write(msg + '\n')
-        sys.stderr.write(traceback.format_exc() + '\n')
-        logObject.error(msg)
-        logObject.error(traceback.format_exc())
-        sys.exit(1)
+	msg = 'Downloading pyseer scripts count_patterns.py and phylogeny_distance.py'
+	sys.stdout.write(msg + '\n')
+	logObject.info(msg)
+	
+	cp_script = pyseer_script_dir + 'count_patterns.py'
+	pd_script = pyseer_script_dir + 'phylogeny_distance.py'
+	curl_cmd_1 = ['curl', '-L', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/count_patterns.py', '-o', cp_script]
+	curl_cmd_2 = ['curl', '-L', 'https://raw.githubusercontent.com/mgalardini/pyseer/master/scripts/phylogeny_distance.py', '-o', pd_script]
+	try:
+		util.runCmdViaSubprocess(curl_cmd_1, logObject=logObject, check_files=[cp_script])
+		util.runCmdViaSubprocess(curl_cmd_2, logObject=logObject, check_files=[pd_script])
+	except Exception as e:
+		msg = 'Had issues downloading pyseer auxiliary scripts!'
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		logObject.error(msg)
+		logObject.error(traceback.format_exc())
+		sys.exit(1)
 
-    # Step 1: Convert species tree to kinship-esque matrix
-    kinship_matrix_file = outdir + 'Kinship_Matrix.txt'
-    phylo_dist_cmd = ['python', pd_script, '--lmm', species_tree, '>', kinship_matrix_file]          
-    try:
-        util.runCmdViaSubprocess(phylo_dist_cmd, logObject=logObject, check_files=[kinship_matrix_file])
-    except Exception as e:
-        msg = 'Issue generating kinship matrix from species phylogeny using the command: %s' % phylo_dist_cmd
-        sys.stderr.write(msg + '\n')
-        sys.stderr.write(traceback.format_exc() + '\n')
-        logObject.error(msg)
-        logObject.error(traceback.format_exc())
-        sys.exit(1)
+	# Step 1: Convert species tree to kinship-esque matrix
+	kinship_matrix_file = outdir + 'Kinship_Matrix.txt'
+	phylo_dist_cmd = ['python', pd_script, '--lmm', species_tree, '>', kinship_matrix_file]          
+	try:
+		util.runCmdViaSubprocess(phylo_dist_cmd, logObject=logObject, check_files=[kinship_matrix_file])
+	except Exception as e:
+		msg = 'Issue generating kinship matrix from species phylogeny using the command: %s' % phylo_dist_cmd
+		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
+		logObject.error(msg)
+		logObject.error(traceback.format_exc())
+		sys.exit(1)
 
-    # Step 2: Create genotype matrix of ortholog groups presence/absence info 
-    genotype_og_matrix_file = outdir + 'Genotype_Matrix_OGs.txt'
-    gmf_og_handle = open(genotype_og_matrix_file, 'w')
-    lt_to_og = {}
-    og_samples = defaultdict(set)
-    all_samples = set([])
-    all_samples_ordered = []
-    with open(orthofinder_matrix_file) as oomf:
-        for i, line in enumerate(oomf):
-            line = line.strip('\n')
-            ls = line.split('\t')
-            if i == 0:
-                gmf_og_handle.write('\t'.join(ls) + '\n')
-                all_samples = set(ls[1:])
-                all_samples_ordered = ls[1:]
-            else:
-                og = ls[0]
-                printlist = [og]
-                for j, lts in enumerate(ls[1:]):
-                    if lts.strip() == '':
-                        printlist.append('0')
-                    else:
-                        printlist.append('1')
-                        sample = all_samples_ordered[j]
-                        og_samples[og].add(sample)
-                        for lt in lts.split(', '):
-                            lt_to_og[lt] = og
-                gmf_og_handle.write('\t'.join(printlist) + '\n')
-    gmf_og_handle.close()
+	# Step 2: Create genotype matrix of ortholog groups presence/absence info 
+	genotype_og_matrix_file = outdir + 'Genotype_Matrix_OGs.txt'
+	lt_to_og = {}
+	og_samples = defaultdict(set)
+	all_samples = set([])
+	all_samples_ordered = []
+	with open(genotype_og_matrix_file, 'w') as gmf_og_handle, open(orthofinder_matrix_file) as oomf:
+		for i, line in enumerate(oomf):
+			line = line.strip('\n')
+			ls = line.split('\t')
+			if i == 0:
+				gmf_og_handle.write('\t'.join(ls) + '\n')
+				all_samples = set(ls[1:])
+				all_samples_ordered = ls[1:]
+			else:
+				og = ls[0]
+				printlist = [og]
+				for j, lts in enumerate(ls[1:]):
+					if lts.strip() == '':
+						printlist.append('0')
+					else:
+						printlist.append('1')
+						sample = all_samples_ordered[j]
+						og_samples[og].add(sample)
+						for lt in lts.split(', '):
+							lt_to_og[lt] = og
+				gmf_og_handle.write('\t'.join(printlist) + '\n')
 
-    # Step 3: Create phenotype/genotype matrix of GCFs presence/absence info
-    gcf_samples = defaultdict(set)
-    all_gcfs = set([])
-    gcf_ogs = defaultdict(set)
-    og_gcfs = defaultdict(set)
-    with open(lsabgc_detailed_listing) as oldlf:
-        for i, line in enumerate(oldlf):
-            if i == 0: continue
-            line = line.strip()
-            sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
-            gcf_samples[gcf_id].add(sample)
-            all_gcfs.add(gcf_id)
-            with open(bgc_path) as obp:
-                for rec in SeqIO.parse(obp, 'genbank'):
-                    for feat in rec.features:
-                        if feat.type != 'CDS': continue 
-                        lt = feat.qualifiers.get('locus_tag')[0]
-                        og = lt_to_og[lt]
-                        gcf_ogs[gcf_id].add(og)
-                        og_gcfs[og].add(gcf_id)
+	# Step 3: Create phenotype/genotype matrix of GCFs presence/absence info
+	gcf_samples = defaultdict(set)
+	all_gcfs = set([])
+	gcf_ogs = defaultdict(set)
+	og_gcfs = defaultdict(set)
+	with open(lsabgc_detailed_listing) as oldlf:
+		for i, line in enumerate(oldlf):
+			if i == 0: continue
+			line = line.strip()
+			sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
+			gcf_samples[gcf_id].add(sample)
+			all_gcfs.add(gcf_id)
+			with open(bgc_path) as obp:
+				for rec in SeqIO.parse(obp, 'genbank'):
+					for feat in rec.features:
+						if feat.type != 'CDS': continue 
+						lt = feat.qualifiers.get('locus_tag')[0]
+						og = lt_to_og[lt]
+						gcf_ogs[gcf_id].add(og)
+						og_gcfs[og].add(gcf_id)
 
-    genotype_gcf_matrix_file = outdir + 'Genotype_Matrix_GCFs.txt'
-    ggm_gcf_handle = open(genotype_gcf_matrix_file, 'w')
-    ggm_gcf_handle.write('GCFs\t' + '\t'.join(sorted(all_samples)) + '\n')
-    gcfs_in_order = []
-    for gcf in sorted(gcf_samples):
-        gcfs_in_order.append(gcf)
-        printlist = [gcf]
-        for sample in sorted(list(all_samples)):
-            if sample in gcf_samples[gcf]:
-                printlist.append('1')
-            else:
-                printlist.append('0')
-        ggm_gcf_handle.write('\t'.join(printlist) + '\n')
-    ggm_gcf_handle.close()
+	genotype_gcf_matrix_file = outdir + 'Genotype_Matrix_GCFs.txt'
+	with open(genotype_gcf_matrix_file, 'w') as ggm_gcf_handle:
+		ggm_gcf_handle.write('GCFs\t' + '\t'.join(sorted(all_samples)) + '\n')
+		gcfs_in_order = []
+		for gcf in sorted(gcf_samples):
+			gcfs_in_order.append(gcf)
+			printlist = [gcf]
+			for sample in sorted(list(all_samples)):
+				if sample in gcf_samples[gcf]:
+					printlist.append('1')
+				else:
+					printlist.append('0')
+			ggm_gcf_handle.write('\t'.join(printlist) + '\n')
 
-    # Step 4: Run Pyseer to infer assocations between ortholog groups and GCFs and 
-    #         between GCFs and GCFs.
+	# Step 4: Run Pyseer to infer associations between ortholog groups and GCFs and 
+	#         between GCFs and GCFs.
 
-    pyseer_results_dir = outdir + 'Pyseer_Results/'
-    pyseer_patterns_dir = outdir + 'Pyseer_Patterns/'
-    pyseer_thresh_dir = outdir + 'Pyseer_Thresholds/'
-    pyseer_inputs_dir = outdir + 'Pyseer_Inputs/'
+	pyseer_results_dir = outdir + 'Pyseer_Results/'
+	pyseer_patterns_dir = outdir + 'Pyseer_Patterns/'
+	pyseer_thresh_dir = outdir + 'Pyseer_Thresholds/'
+	pyseer_inputs_dir = outdir + 'Pyseer_Inputs/'
 
-    util.setupReadyDirectory([pyseer_inputs_dir, pyseer_patterns_dir, pyseer_thresh_dir, pyseer_results_dir])
+	util.setupReadyDirectory([pyseer_inputs_dir, pyseer_patterns_dir, pyseer_thresh_dir, pyseer_results_dir])
 
-    pyseer_cmds = []
-    count_cmds = []
-    for gcf in all_gcfs:
-        
-        pheno_gcf_input = pyseer_inputs_dir + gcf + '.txt'
-        pgi_handle = open(pheno_gcf_input, 'w')
-        for sample in all_samples:
-            val = '0'
-            if sample in gcf_samples[gcf]:
-                val = '1'
-            pgi_handle.write(sample + '\t' + str(val) + '\n')
-        pgi_handle.close()
+	pyseer_cmds = []
+	count_cmds = []
+	for gcf in all_gcfs:
+		
+		pheno_gcf_input = pyseer_inputs_dir + gcf + '.txt'
+		with open(pheno_gcf_input, 'w') as pgi_handle:
+			for sample in all_samples:
+				val = '0'
+				if sample in gcf_samples[gcf]:
+					val = '1'
+				pgi_handle.write(sample + '\t' + str(val) + '\n')
 
-        og_result_file = pyseer_results_dir + gcf + '_OG_Results.txt'
-        og_pattern_file = pyseer_patterns_dir + gcf + '_OG_Patterns.txt'
-        og_count_file = pyseer_thresh_dir + gcf + '_OG_Threshold_Info.txt'
-        pyseer_og_cmd = ['pyseer', '--lmm', '--phenotypes', pheno_gcf_input, '--pres', 
-                        genotype_og_matrix_file, '--min-af', '0.05', '--max-af', '0.95', '--cpu', 
-                        '1', '--similarity', kinship_matrix_file, '--output-patterns', 
-                        og_pattern_file, '>', og_result_file]
-        count_og_cmd = ['python', cp_script, og_pattern_file, '>', og_count_file]
-        pyseer_cmds.append(pyseer_og_cmd)
-        count_cmds.append(count_og_cmd)
+		og_result_file = pyseer_results_dir + gcf + '_OG_Results.txt'
+		og_pattern_file = pyseer_patterns_dir + gcf + '_OG_Patterns.txt'
+		og_count_file = pyseer_thresh_dir + gcf + '_OG_Threshold_Info.txt'
+		pyseer_og_cmd = ['pyseer', '--lmm', '--phenotypes', pheno_gcf_input, '--pres', 
+						genotype_og_matrix_file, '--min-af', '0.05', '--max-af', '0.95', '--cpu', 
+						'1', '--similarity', kinship_matrix_file, '--output-patterns', 
+						og_pattern_file, '>', og_result_file]
+		count_og_cmd = ['python', cp_script, og_pattern_file, '>', og_count_file]
+		pyseer_cmds.append(pyseer_og_cmd)
+		count_cmds.append(count_og_cmd)
 
-        gcf_result_file = pyseer_results_dir + gcf + '_GCF_Results.txt'
-        gcf_pattern_file = pyseer_patterns_dir + gcf + '_GCF_Patterns.txt' 
-        gcf_count_file = pyseer_thresh_dir + gcf + '_GCF_Threshold_Info.txt' 
-        pyseer_gcf_cmd = ['pyseer', '--lmm', '--phenotypes', pheno_gcf_input, '--pres', 
-                        genotype_gcf_matrix_file, '--min-af', '0.05', '--max-af', '0.95', '--cpu', 
-                        '1', '--similarity', kinship_matrix_file, '--output-patterns', 
-                        gcf_pattern_file, '>', gcf_result_file]
-        count_gcf_cmd = ['python', cp_script, gcf_pattern_file, '>', gcf_count_file]
-        pyseer_cmds.append(pyseer_gcf_cmd)
-        count_cmds.append(count_gcf_cmd)
+		gcf_result_file = pyseer_results_dir + gcf + '_GCF_Results.txt'
+		gcf_pattern_file = pyseer_patterns_dir + gcf + '_GCF_Patterns.txt' 
+		gcf_count_file = pyseer_thresh_dir + gcf + '_GCF_Threshold_Info.txt' 
+		pyseer_gcf_cmd = ['pyseer', '--lmm', '--phenotypes', pheno_gcf_input, '--pres', 
+						genotype_gcf_matrix_file, '--min-af', '0.05', '--max-af', '0.95', '--cpu', 
+						'1', '--similarity', kinship_matrix_file, '--output-patterns', 
+						gcf_pattern_file, '>', gcf_result_file]
+		count_gcf_cmd = ['python', cp_script, gcf_pattern_file, '>', gcf_count_file]
+		pyseer_cmds.append(pyseer_gcf_cmd)
+		count_cmds.append(count_gcf_cmd)
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            executor.map(util.multiProcessNoLog, pyseer_cmds)
-    except Exception as e:
-        msg = 'Issues running pyseer in parallel.\n'
-        sys.stderr.write(msg)
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
+	try:
+		with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+			list(executor.map(util.multiProcessNoLog, pyseer_cmds))
+	except Exception as e:
+		msg = 'Issues running pyseer in parallel.\n'
+		sys.stderr.write(msg)
+		sys.stderr.write(traceback.format_exc())
+		sys.exit(1)
 
-    """
-    # Bonferonni correction no longer performed per focal GCF - feature type
+	"""
+    # Bonferroni correction no longer performed per focal GCF - feature type
     # but rather comprehensively.    
 
     try:
@@ -325,287 +319,295 @@ def lsaBGC_Sociate():
                     gcf_pval_thresholds[gcf][type] = pval_threshold
     """
 
-    tot_tests = 0
-    for f in os.listdir(pyseer_results_dir):
-        with open(pyseer_results_dir + f) as oprf:
-            for i, line in enumerate(oprf):
-                if i == 0: continue
-                tot_tests += 1
+	tot_tests = 0
+	for f in os.listdir(pyseer_results_dir):
+		with open(pyseer_results_dir + f) as oprf:
+			for i, line in enumerate(oprf):
+				if i == 0: continue
+				tot_tests += 1
 
-    tot_tests = 0
-    mt_cor_alpha = 0.05
-    if tot_tests >= 1:
-        mt_cor_alpha = 0.05/tot_tests
+	# Bonferroni correction across all association tests performed (all GCFs, OG and GCF genotypes)
+	mt_cor_alpha = 0.05
+	if tot_tests >= 1:
+		mt_cor_alpha = 0.05/tot_tests
+	msg = 'Applying Bonferroni-corrected significance threshold of %s (alpha of 0.05 across %d tests) to phylogenetically corrected p-values.' % (str(mt_cor_alpha), tot_tests)
+	sys.stdout.write(msg + '\n')
+	logObject.info(msg)
 
-    hits = []
-    sociated_ogs = set([])
-    for f in os.listdir(pyseer_results_dir):
-        gcf = '_'.join(f.split('_')[:2])
-        soc_type = 'OG'
-        if f.endswith('_GCF_Results.txt'):
-            soc_type = 'GCF'
-        with open(pyseer_results_dir + f) as ogcf:
-            for i, line in enumerate(ogcf):
-                if i == 0: continue
-                line = line.strip('\n')
-                ls = line.split('\t')
-                lrt_pval = float(ls[3])
-                #if lrt_pval <= gcf_pval_thresholds[gcf][soc_type]:
-                if lrt_pval <= mt_cor_alpha:
-                    if report_hits_with_notes_flag or ls[-1] == '':
-                        genotype = ls[0]
-                        if genotype != gcf and not genotype in gcf_ogs[gcf]:
-                            hits.append([gcf] + ls)
-                            sociated_ogs.add(ls[0])
+	hits = []
+	sociated_ogs = set([])
+	for f in os.listdir(pyseer_results_dir):
+		gcf = '_'.join(f.split('_')[:2])
+		soc_type = 'OG'
+		if f.endswith('_GCF_Results.txt'):
+			soc_type = 'GCF'
+		with open(pyseer_results_dir + f) as ogcf:
+			for i, line in enumerate(ogcf):
+				if i == 0: continue
+				line = line.strip('\n')
+				ls = line.split('\t')
+				lrt_pval = float(ls[3])
+				#if lrt_pval <= gcf_pval_thresholds[gcf][soc_type]:
+				if lrt_pval <= mt_cor_alpha:
+					if report_hits_with_notes_flag or ls[-1] == '':
+						genotype = ls[0]
+						if genotype != gcf and not genotype in gcf_ogs[gcf]:
+							hits.append([gcf] + ls)
+							sociated_ogs.add(ls[0])
 
-    # Step 6: Annotate associated/disassociated orthogroups
-    soc_og_protseq_dir = outdir + 'Sociated_OG_Protein_Seqs/'
-    soc_og_protalgn_dir = outdir + 'Sociated_OG_Protein_Alignments/'
-    soc_og_hmm_dir = outdir + 'Sociated_OG_Protein_HMMs/'
-    soc_og_consensus_dir = outdir + 'Sociated_OG_Protein_Consensus_Sequences/'
-    util.setupReadyDirectory([soc_og_protseq_dir, soc_og_protalgn_dir, soc_og_hmm_dir, soc_og_consensus_dir])
-    
-    with open(lsabgc_detailed_listing) as oldlf:
-        for i, line in enumerate(oldlf):
-            if i == 0: continue
-            line = line.strip()
-            sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcfid, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
-            gcf_samples[gcf_id].add(sample)
-            all_gcfs.add(gcf_id)
-            with open(genome_path) as ogp:
-                for rec in SeqIO.parse(ogp, 'genbank'):
-                    for feat in rec.features:
-                        if feat.type != 'CDS': continue 
-                        lt = feat.qualifiers.get('locus_tag')[0]
-                        og = lt_to_og[lt]
-                        if og in sociated_ogs:
-                            prot_seq = feat.qualifiers.get('translation')[0]
-                            prot_faa = soc_og_protseq_dir + og + '.faa'
-                            pf_handle = open(prot_faa, 'a+')
-                            pf_handle.write('>' + sample + '|' + lt + '\n' + prot_seq + '\n')
-                            pf_handle.close()
+	# Step 6: Annotate associated/disassociated orthogroups
+	soc_og_protseq_dir = outdir + 'Sociated_OG_Protein_Seqs/'
+	soc_og_protalgn_dir = outdir + 'Sociated_OG_Protein_Alignments/'
+	soc_og_hmm_dir = outdir + 'Sociated_OG_Protein_HMMs/'
+	soc_og_consensus_dir = outdir + 'Sociated_OG_Protein_Consensus_Sequences/'
+	util.setupReadyDirectory([soc_og_protseq_dir, soc_og_protalgn_dir, soc_og_hmm_dir, soc_og_consensus_dir])
+	
+	sample_genome_paths = {}
+	with open(lsabgc_detailed_listing) as oldlf:
+		for i, line in enumerate(oldlf):
+			if i == 0: continue
+			line = line.strip()
+			sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
+			gcf_samples[gcf_id].add(sample)
+			all_gcfs.add(gcf_id)
+			sample_genome_paths[sample] = genome_path
 
-    muscle_cmds = []
-    for og in sociated_ogs:
-        if og.startswith('GCF'): continue
-        og_prot_faa = soc_og_protseq_dir + og + '.faa'
-        og_prot_msa = soc_og_protalgn_dir + og + '.msa.faa'
+	# parse each genome only once to avoid writing duplicate protein entries for samples with multiple BGCs
+	for sample in sorted(sample_genome_paths):
+		genome_path = sample_genome_paths[sample]
+		with open(genome_path) as ogp:
+			for rec in SeqIO.parse(ogp, 'genbank'):
+				for feat in rec.features:
+					if feat.type != 'CDS': continue
+					lt_list = feat.qualifiers.get('locus_tag')
+					prot_list = feat.qualifiers.get('translation')
+					if lt_list is None or prot_list is None: continue
+					lt = lt_list[0]
+					og = lt_to_og.get(lt)
+					if og in sociated_ogs:
+						prot_faa = soc_og_protseq_dir + og + '.faa'
+						with open(prot_faa, 'a+') as pf_handle:
+							pf_handle.write('>' + sample + '|' + lt + '\n' + prot_list[0] + '\n')
 
-        muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread), timeout_time]
-        muscle_cmds.append(muscle_cmd)
-    
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-            executor.map(util.multiProcessNoLogWithTimeout, muscle_cmds)
-    except Exception as e:
-        msg = 'Issues running muscle in parallel!\n'
-        sys.stderr.write(msg)
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
+	muscle_cmds = []
+	for og in sociated_ogs:
+		if og.startswith('GCF'): continue
+		og_prot_faa = soc_og_protseq_dir + og + '.faa'
+		og_prot_msa = soc_og_protalgn_dir + og + '.msa.faa'
 
-    hmmbuild_cmds = []
-    hmmemit_cmds = []
-    annotation_notes = defaultdict(lambda: '')
-    for og in sociated_ogs:
-        og_prot_faa = soc_og_protseq_dir + og + '.faa'
-        og_prot_msa = soc_og_protalgn_dir + og + '.msa.faa'
-        og_prot_hmm = soc_og_hmm_dir + og + '.hmm'
-        og_prot_con = soc_og_consensus_dir + og + '.faa'
+		muscle_cmd = ['muscle', '-super5', og_prot_faa, '-amino', '-output', og_prot_msa, '-threads', str(multi_thread), timeout_time]
+		muscle_cmds.append(muscle_cmd)
+	
+	try:
+		with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
+			list(executor.map(util.multiProcessNoLogWithTimeout, muscle_cmds))
+	except Exception as e:
+		msg = 'Issues running muscle in parallel!\n'
+		sys.stderr.write(msg)
+		sys.stderr.write(traceback.format_exc())
+		sys.exit(1)
 
-        if os.path.isfile(og_prot_msa) and os.path.getsize(og_prot_msa) > 50:
-            hmmbuild_cmd = ['hmmbuild', '--amino', '--cpu', '1', '-n', og, og_prot_hmm, og_prot_msa]
-            hmmbuild_cmds.append(hmmbuild_cmd)
-    
-            hmmemit_cmd = ['hmmemit', '-c', '-o', og_prot_con, og_prot_hmm, ]
-            hmmemit_cmds.append(hmmemit_cmd)
-        else:
-            annotation_notes[og] = 'alignment timed out during construction to generate consensus sequence for annotation - full set of protein sequences for the orthogroup can be found at: %s' % og_prot_faa
+	hmmbuild_cmds = []
+	hmmemit_cmds = []
+	annotation_notes = defaultdict(lambda: '')
+	for og in sociated_ogs:
+		og_prot_faa = soc_og_protseq_dir + og + '.faa'
+		og_prot_msa = soc_og_protalgn_dir + og + '.msa.faa'
+		og_prot_hmm = soc_og_hmm_dir + og + '.hmm'
+		og_prot_con = soc_og_consensus_dir + og + '.faa'
 
-    if len(hmmbuild_cmds) > 0:
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-                executor.map(util.multiProcessNoLog, hmmbuild_cmds)
-        except Exception as e:
-            msg = 'Issues running hmmbuild in parallel.\n'
-            sys.stderr.write(msg)
-            sys.stderr.write(traceback.format_exc())
-            sys.exit(1)
+		if os.path.isfile(og_prot_msa) and os.path.getsize(og_prot_msa) > 50:
+			hmmbuild_cmd = ['hmmbuild', '--amino', '--cpu', '1', '-n', og, og_prot_hmm, og_prot_msa]
+			hmmbuild_cmds.append(hmmbuild_cmd)
+	
+			hmmemit_cmd = ['hmmemit', '-c', '-o', og_prot_con, og_prot_hmm, ]
+			hmmemit_cmds.append(hmmemit_cmd)
+		else:
+			annotation_notes[og] = 'alignment timed out during construction to generate consensus sequence for annotation - full set of protein sequences for the orthogroup can be found at: %s' % og_prot_faa
 
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-                executor.map(util.multiProcessNoLog, hmmemit_cmds)
-        except Exception as e:
-            msg = 'Issues running hmmemit in parallel.\n'
-            sys.stderr.write(msg)
-            sys.stderr.write(traceback.format_exc())
-            sys.exit(1)
+	if len(hmmbuild_cmds) > 0:
+		try:
+			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+				list(executor.map(util.multiProcessNoLog, hmmbuild_cmds))
+		except Exception as e:
+			msg = 'Issues running hmmbuild in parallel.\n'
+			sys.stderr.write(msg)
+			sys.stderr.write(traceback.format_exc())
+			sys.exit(1)
 
-    consensus_results_file = outdir + 'Sociated_OGs_Consensus_Sequences.faa'
-    crf_handle = open(consensus_results_file, 'w')
-    con_seqs = 0
-    for f in os.listdir(soc_og_consensus_dir):
-        og = f.split('.faa')[0]
-        con_seqs += 1
-        with open(soc_og_consensus_dir + f) as ocf:
-            for rec in SeqIO.parse(ocf, 'fasta'):
-                crf_handle.write('>' + og + '\n' + str(rec.seq) + '\n')
-    crf_handle.close()
+		try:
+			with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+				list(executor.map(util.multiProcessNoLog, hmmemit_cmds))
+		except Exception as e:
+			msg = 'Issues running hmmemit in parallel.\n'
+			sys.stderr.write(msg)
+			sys.stderr.write(traceback.format_exc())
+			sys.exit(1)
 
-    annot_dir = outdir + 'Sociated_OGs_Annotations/'
-    annotation_result = annot_dir + 'Annotation_Results.tsv'
-    soc_og_annotations = defaultdict(lambda: ['NA']*9)
-    if con_seqs > 0:
-        annotate_cmd = ['annotateProtSeqs.py', '-i', consensus_results_file, '-o', annot_dir, '-c', str(threads)]
-        util.runCmdViaSubprocess(annotate_cmd, logObject=logObject, check_files=[annotation_result])
-        with open(annotation_result) as oar:
-            for line in oar:
-                line = line.strip('\n')
-                prot, ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots, prot_seq = line.split('\t')
-                soc_og_annotations[prot] = [ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots]
+	consensus_results_file = outdir + 'Sociated_OGs_Consensus_Sequences.faa'
+	with open(consensus_results_file, 'w') as crf_handle:
+		con_seqs = 0
+		for f in os.listdir(soc_og_consensus_dir):
+			og = f.split('.faa')[0]
+			con_seqs += 1
+			with open(soc_og_consensus_dir + f) as ocf:
+				for rec in SeqIO.parse(ocf, 'fasta'):
+					crf_handle.write('>' + og + '\n' + str(rec.seq) + '\n')
 
-    # Step 7: Create final results file and visualizations
-    track_dir = outdir + 'Tracks_for_Visual/'
-    script_dir = viz_outdir + 'Rscripts/'
-    plot_dir = viz_outdir + 'Plots/'
-    util.setupReadyDirectory([track_dir, script_dir, plot_dir])
+	annot_dir = outdir + 'Sociated_OGs_Annotations/'
+	annotation_result = annot_dir + 'Annotation_Results.tsv'
+	soc_og_annotations = defaultdict(lambda: ['NA']*9)
+	if con_seqs > 0:
+		annotate_cmd = ['annotateProtSeqs.py', '-i', consensus_results_file, '-o', annot_dir, '-c', str(threads)]
+		util.runCmdViaSubprocess(annotate_cmd, logObject=logObject, check_files=[annotation_result])
+		with open(annotation_result) as oar:
+			for line in oar:
+				line = line.strip('\n')
+				prot, ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots, prot_seq = line.split('\t')
+				soc_og_annotations[prot] = [ko_annot, pgap_annot, pb_annot, card_annot, isf_annot, mibig_annot, vog_annot, vfdb_annot, pfam_annots]
 
-    final_result_tsv = outdir + 'Final_Sociated_Results.tsv'
-    frt = open(final_result_tsv, 'w')
-    header = ['focal GCF', 'assocaited GCF/OG', 'allele frequency', 'direction', 'frequency in samples with focal GCF',
-              'frequency in samples without focal GCF', 'pvalue', 'phylgoenetically corrected pvalue', 'beta', 
-              'beta-std-err', 'variant_h2', 'notes', 'annotation notes', 'KO Annotation (E-value)', 'PGAP Annotation (E-value)', 
-              'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)', 'IS Finder (E-value)', 
-              'MI-BiG Annotation (E-value)', 'VOG Annotation (E-value)',  'VFDB Annotation (E-value)', 'Pfam Domains']
-    frt.write('\t'.join(header) + '\n')
-    foc_gcfs_with_hits = set([])
-    for hit in hits:
-        foc_gcf = hit[0]
-        foc_gcfs_with_hits.add(foc_gcf)
-        track_file = track_dir + foc_gcf + '.txt'
-        
-        foc_gcf_samples = gcf_samples[hit[0]]
+	# Step 7: Create final results file and visualizations
+	track_dir = outdir + 'Tracks_for_Visual/'
+	script_dir = viz_outdir + 'Rscripts/'
+	plot_dir = viz_outdir + 'Plots/'
+	util.setupReadyDirectory([track_dir, script_dir, plot_dir])
 
-        w_focgcf_w_socfeat = 0
-        wo_focgcf_w_socfeat = 0
-        if hit[1].startswith('GCF'):  
-            for s in gcf_samples[hit[1]]:
-                if s in foc_gcf_samples:
-                    w_focgcf_w_socfeat += 1
-                else:
-                    wo_focgcf_w_socfeat += 1
-        else:
-            for s in og_samples[hit[1]]:
-                if s in foc_gcf_samples:
-                    w_focgcf_w_socfeat += 1
-                else:
-                    wo_focgcf_w_socfeat += 1
+	final_result_tsv = outdir + 'Final_Sociated_Results.tsv'
+	with open(final_result_tsv, 'w') as frt:
+		header = ['focal GCF', 'associated GCF/OG', 'allele frequency', 'direction', 'frequency in samples with focal GCF',
+				  'frequency in samples without focal GCF', 'pvalue', 'phylogenetically corrected pvalue', 'beta', 
+				  'beta-std-err', 'variant_h2', 'notes', 'annotation notes', 'KO Annotation (E-value)', 'PGAP Annotation (E-value)', 
+				  'PaperBLAST Annotation (E-value)', 'CARD Annotation (E-value)', 'IS Finder (E-value)', 
+				  'MIBiG Annotation (E-value)', 'VOG Annotation (E-value)',  'VFDB Annotation (E-value)', 'Pfam Domains']
+		frt.write('\t'.join(header) + '\n')
+		foc_gcfs_with_hits = set([])
+		for hit in hits:
+			foc_gcf = hit[0]
+			foc_gcfs_with_hits.add(foc_gcf)
+			track_file = track_dir + foc_gcf + '.txt'
+		
+			foc_gcf_samples = gcf_samples[hit[0]]
 
-        try:
-            assert(len(foc_gcf_samples) > 0)
-        except Exception as e:
-            msg = 'Issue finding samples with the GCF ' + hit[0] + ' - this should not happen!'
-            sys.stderr.write(msg + '\n')
-            logObject.error(msg)
+			w_focgcf_w_socfeat = 0
+			wo_focgcf_w_socfeat = 0
+			if hit[1].startswith('GCF'):  
+				for s in gcf_samples[hit[1]]:
+					if s in foc_gcf_samples:
+						w_focgcf_w_socfeat += 1
+					else:
+						wo_focgcf_w_socfeat += 1
+			else:
+				for s in og_samples[hit[1]]:
+					if s in foc_gcf_samples:
+						w_focgcf_w_socfeat += 1
+					else:
+						wo_focgcf_w_socfeat += 1
 
-        w_prop = w_focgcf_w_socfeat / len(foc_gcf_samples)	
-        wo_prop = 0.0
-        if (len(all_samples) - len(foc_gcf_samples)) > 0:
-            wo_prop = wo_focgcf_w_socfeat / (len(all_samples)-len(foc_gcf_samples))
+			if not (len(foc_gcf_samples) > 0):
+				msg = 'Issue finding samples with the GCF ' + hit[0] + ' - this should not happen!'
+				sys.stderr.write(msg + '\n')
+				logObject.error(msg)
 
-        direction = 'positive'
-        if w_prop == wo_prop:
-            direction = '-'
-        elif w_prop < wo_prop:
-            direction = 'negative'
-    
-        tfh = open(track_file, 'a+')
-        if hit[1].startswith('GCF'):  
-            for s in gcf_samples[hit[1]]:
-                tfh.write('\t'.join([hit[1], s, hit[4], direction]) + '\n')
-        else:
-            for s in og_samples[hit[1]]:          
-                tfh.write('\t'.join([hit[1], s, hit[4], direction]) + '\n')
-        tfh.close()
+			w_prop = w_focgcf_w_socfeat / len(foc_gcf_samples)	
+			wo_prop = 0.0
+			if (len(all_samples) - len(foc_gcf_samples)) > 0:
+				wo_prop = wo_focgcf_w_socfeat / (len(all_samples)-len(foc_gcf_samples))
 
-        frt.write('\t'.join(hit[:3] + [direction, str(w_prop), str(wo_prop)] +  hit[3:] + [annotation_notes[hit[1]]] + soc_og_annotations[hit[1]]) + '\n')
+			direction = 'positive'
+			if w_prop == wo_prop:
+				direction = '-'
+			elif w_prop < wo_prop:
+				direction = 'negative'
+	
+			with open(track_file, 'a+') as tfh:
+				if hit[1].startswith('GCF'):  
+					for s in gcf_samples[hit[1]]:
+						tfh.write('\t'.join([hit[1], s, hit[4], direction]) + '\n')
+				else:
+					for s in og_samples[hit[1]]:
+						tfh.write('\t'.join([hit[1], s, hit[4], direction]) + '\n')
 
-    frt.close()
+			frt.write('\t'.join(hit[:3] + [direction, str(w_prop), str(wo_prop)] +  hit[3:] + [annotation_notes[hit[1]]] + soc_og_annotations[hit[1]]) + '\n')
 
-    plot_inputs = []
-    for fg in foc_gcfs_with_hits:
-        track_file = track_dir + fg + '.txt'
-        plot_file = plot_dir + fg + '.pdf'
-        rscript_file = script_dir + fg + '.R'
-        tfh = open(track_file, 'a+')
-        for s in gcf_samples[fg]:
-            tfh.write('\t'.join(['focal_GCF', s, str(0.0), 'focal']) + '\n')
-        tfh.close()
-        plot_inputs.append([fg, species_tree, track_file, rscript_file, plot_file, logObject])
+	plot_inputs = []
+	for fg in foc_gcfs_with_hits:
+		track_file = track_dir + fg + '.txt'
+		plot_file = plot_dir + fg + '.pdf'
+		rscript_file = script_dir + fg + '.R'
+		with open(track_file, 'a+') as tfh:
+			for s in gcf_samples[fg]:
+				tfh.write('\t'.join(['focal_GCF', s, str(0.0), 'focal']) + '\n')
+		plot_inputs.append([fg, species_tree, track_file, rscript_file, plot_file, logObject])
 
-    os.environ["OMP_NUM_THREADS"] = "1"
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            executor.map(runPlotting, plot_inputs)
-    except Exception as e:
-        msg = 'Issues running plotting in parallel.\n'
-        sys.stderr.write(msg)
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
-    os.environ["OMP_NUM_THREADS"] = "4"
+	os.environ["OMP_NUM_THREADS"] = "1"
+	try:
+		with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+			plot_results = list(executor.map(runPlotting, plot_inputs))
+			failed_plots = len([x for x in plot_results if x is False])
+			if failed_plots > 0:
+				msg = 'Warning: %d of %d plots could not be created - see the log file for details.' % (failed_plots, len(plot_inputs))
+				sys.stderr.write(msg + '\n')
+				logObject.warning(msg)
+	except Exception as e:
+		msg = 'Issues running plotting in parallel.\n'
+		sys.stderr.write(msg)
+		sys.stderr.write(traceback.format_exc())
+		sys.exit(1)
+	os.environ["OMP_NUM_THREADS"] = "4"
 
-    # Write checkpoint file 
-    checkpoint_file = outdir + 'CHECKPOINT.txt'
-    checkpoint_handle = open(checkpoint_file, 'w')
-    checkpoint_handle.write('lsaBGC-Sociate completed successfully!')
-    checkpoint_handle.close()
+	# Write checkpoint file 
+	checkpoint_file = outdir + 'CHECKPOINT.txt'
+	with open(checkpoint_file, 'w') as checkpoint_handle:
+		checkpoint_handle.write('lsaBGC-Sociate completed successfully!')
 
-    # Close logging object and exit
-    util.closeLoggerObject(logObject)
-    sys.exit(0)
+	# Close logging object and exit
+	util.closeLoggerObject(logObject)
+	sys.exit(0)
 
 def runPlotting(inputs):
-    gcf_id, species_tree, track_file, rscript_file, pdf_file, logObject = inputs
-    try:
-        gs_handle = open(rscript_file, 'w')
+	gcf_id, species_tree, track_file, rscript_file, pdf_file, logObject = inputs
+	html_file = os.path.splitext(pdf_file)[0] + '.html'
+	phyloplot.safely_create(phyloplot.sociate_html, species_tree, track_file, html_file,
+							'lsaBGC-Sociate: features (dis-)associated with %s' % gcf_id, logObject=logObject)
+	try:
+		with open(rscript_file, 'w') as gs_handle:
+			gs_handle.write('library(ggplot2)\n')  
+			gs_handle.write('library(ggtree)\n')
+			gs_handle.write('library(gggenes)\n')
+			gs_handle.write('library(ape)\n')
+			gs_handle.write('library(phytools)\n')
+			gs_handle.write('library(aplot)\n')
+			gs_handle.write('library(dplyr)\n')
+			gs_handle.write('library(grid)\n')
+			gs_handle.write('library(gridExtra)\n\n')
 
-        gs_handle.write('library(ggplot2)\n')  
-        gs_handle.write('library(ggtree)\n')
-        gs_handle.write('library(gggenes)\n')
-        gs_handle.write('library(ape)\n')
-        gs_handle.write('library(phytools)\n')
-        gs_handle.write('library(aplot)\n')
-        gs_handle.write('library(dplyr)\n')
-        gs_handle.write('library(grid)\n')
-        gs_handle.write('library(gridExtra)\n\n')
+			gs_handle.write('phylo.tree <- read.tree("' + species_tree + '")\n')
+			gs_handle.write('phylo.tree <- midpoint.root(phylo.tree)\n')
+			gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
 
-        gs_handle.write('phylo.tree <- read.tree("' + species_tree + '")\n')
-        gs_handle.write('phylo.tree <- midpoint.root(phylo.tree)\n')
-        gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
+			gs_handle.write('heatmap.data <- read.table("' + track_file + '", header=F, sep="\\t")\n')
+			gs_handle.write('colnames(heatmap.data) <- c("allele", "label", "order", "value")\n')
+			gs_handle.write('colors <- c("#242424", "#6f7070", "#4b7dc9", "#db6588")\n')
+			gs_handle.write('names(colors) <- c("focal", "-", "positive", "negative")\n\n')
 
-        gs_handle.write('heatmap.data <- read.table("' + track_file + '", header=F, sep="\\t")\n')
-        gs_handle.write('colnames(heatmap.data) <- c("allele", "label", "order", "value")\n')
-        gs_handle.write('colors <- c("#242424", "#6f7070", "#4b7dc9", "#db6588")\n')
-        gs_handle.write('names(colors) <- c("focal", "-", "positive", "negative")\n\n')
+			gs_handle.write('pdf("' + pdf_file + '", height=10, width=20)\n')
+			gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')   
+			gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = reorder(allele, order), y = label, fill = value)) +\n') 
+			gs_handle.write('theme_classic() + scale_fill_manual(values=colors, na.value="white") +\n')
+			gs_handle.write('xlab("") + ylab("") + geom_tile(color="white", show.legend=F) +\n')
+			gs_handle.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
+			gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
+			gs_handle.write('dev.off()\n\n')
 
-        gs_handle.write('pdf("' + pdf_file + '", height=10, width=20)\n')
-        gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')   
-        gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = reorder(allele, order), y = label, fill = value)) +\n') 
-        gs_handle.write('theme_classic() + scale_fill_manual(values=colors, na.value="white") +\n')
-        gs_handle.write('xlab("") + ylab("") + geom_tile(color="white", show.legend=F) +\n')
-        gs_handle.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
-        gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
-        gs_handle.write('dev.off()\n\n')
-
-        gs_handle.close()
-		
-        rscript_cmd = ['Rscript', rscript_file]
-        util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[pdf_file])
-    except Exception as e:
-        msg = 'Issues running creation of %s lsaBGC-Sociate phylo-heatmap plot for associated features: %s' % gcf_id
-        sys.stderr.write(msg + '\n')
-        logObject.error(msg)
-        sys.stderr.write(traceback.format_exc() + '\n')
-        sys.exit(1)
+		rscript_cmd = ['Rscript', rscript_file]
+		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[pdf_file])
+		return True
+	except Exception as e:
+		msg = 'Issues running creation of lsaBGC-Sociate phylo-heatmap plot for associated features: %s' % gcf_id
+		sys.stderr.write(msg + '\n')
+		logObject.error(msg)
+		sys.stderr.write(traceback.format_exc() + '\n')
+		return False
 
 if __name__ == '__main__':
-    lsaBGC_Sociate()
+	lsaBGC_Sociate()

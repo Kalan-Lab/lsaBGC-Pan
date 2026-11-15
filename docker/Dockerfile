@@ -13,7 +13,7 @@ SHELL ["/bin/bash", "-c"]
 # github repo and create conda environment
 RUN apt-get update && apt-get install -y git wget gcc && \
     conda install -n base conda-libmamba-solver && conda config --set solver libmamba && \
-    conda create -p /usr/src/lsaBGC_conda_env/ -c conda-forge -c bioconda lsabgc panaroo bofasa && \
+    conda create -p /usr/src/lsaBGC_conda_env/ -c conda-forge -c bioconda lsabgc panaroo bofasa plotly && \
     conda clean --all -y && \
     echo "source activate /usr/src/lsaBGC_conda_env/" > ~/.bashrc && source ~/.bashrc && \
     apt-get clean -y && apt-get autoclean -y && apt-get autoremove -y && \

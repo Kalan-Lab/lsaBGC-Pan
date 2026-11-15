@@ -40,10 +40,12 @@ import sys
 import argparse
 from collections import defaultdict
 from lsaBGC import util
+from lsaBGC import phyloplot
 import itertools
 from time import sleep
 from ete3 import Tree
 import shutil
+import traceback
 
 IDENTITY_CUTOFFS = [80.0, 90.0, 95.0, 97.0, 98.0, 99.0, 99.5]
 
@@ -58,11 +60,11 @@ def create_parser():
     (AAI) cutoffs to determine populations. 
 	""", formatter_class=argparse.RawTextHelpFormatter)
 
-	parser.add_argument('-a', '--alignment', help='The processed orthogroup by sample matrix.', required=True)
+	parser.add_argument('-a', '--alignment', help='Protein multiple sequence alignment in FASTA format (e.g. the concatenated MSA produced by phylogenate).', required=True)
 	parser.add_argument('-p', '--phylogeny', help='A newick file describing the species tree (can be produced by phylogenate).', required=False, default=None)
 	parser.add_argument('-o', '--output_directory', help='Parent output/workspace directory.', required=True)
 	parser.add_argument('-t', '--test_parameters', action='store_true', help='Test cutoffs for AAI for grouping populations and create visuals showing them.', default=False, required=False)
-	parser.add_argument('-i', '--identity_cutoff', type=float, help='The AAI between [Default is 99.0]', default=99.0, required=False)
+	parser.add_argument('-i', '--identity_cutoff', type=float, help='The AAI cutoff for grouping samples into populations [Default is 99.0]', default=99.0, required=False)
 	parser.add_argument('-s', '--skip_midpoint', action='store_true', help="Skip midpoint rooting of phylogeny - note tree should be rooted in some way for visualization!", required=False, default=False)
 	args = parser.parse_args()
 	return args
@@ -94,7 +96,8 @@ def popstrat():
 			t.set_outgroup(R)
 			t.write(format=1, outfile=rooted_species_tree_file)
 		except Exception as e:
-			sys.stderr.write('Error: Issue midpoint rooting the species tree.')
+			sys.stderr.write('Error: Issue midpoint rooting the species tree.\n')
+			sys.stderr.write(traceback.format_exc())
 			sys.exit(1)
 	else:
 		rooted_species_tree_file = phylogeny_file
@@ -113,13 +116,12 @@ def popstrat():
 	expected_similarities_file = outdir + 'Expected_Similarities.txt'
 
 	pair_seq_matching = util.determineSeqSimProteinAlignment(alignment_file)
-	expected_sim_handle = open(expected_similarities_file, 'w')
-	for s1 in pair_seq_matching:
-		for s2 in pair_seq_matching:
-			exp_sim = str(pair_seq_matching[s1][s2])
-			if s1 == s2: exp_sim = '1.0'
-			expected_sim_handle.write(s1 + '\t' + s2 + '\t' + exp_sim + '\n')
-	expected_sim_handle.close()
+	with open(expected_similarities_file, 'w') as expected_sim_handle:
+		for s1 in pair_seq_matching:
+			for s2 in pair_seq_matching:
+				exp_sim = str(pair_seq_matching[s1][s2])
+				if s1 == s2: exp_sim = '1.0'
+				expected_sim_handle.write(s1 + '\t' + s2 + '\t' + exp_sim + '\n')
 
 	all_samples = set([])
 	population_pairs = defaultdict(list)
@@ -159,32 +161,34 @@ def popstrat():
 		"""
 		L = list(population_pairs[ic])
 		LL = set(itertools.chain.from_iterable(L))
-		for each in LL:
+		for each in sorted(LL):
 			components = [x for x in L if each in x]
 			for i in components:
 				L.remove(i)
 			L += [list(set(itertools.chain.from_iterable(components)))]
 
-		for s in all_samples:
+		for s in sorted(all_samples):
 			if not s in samples_in_population_pairs[ic]:
 				L.append([s])
 
+		# sort clusters (and members) so that clade numbering is reproducible across runs
+		L = sorted([sorted(sc) for sc in L], key=lambda x: (-len(x), x[0]))
+
 		population_spec_file = poplist_dir + 'Sample_to_Population_' + str(ic) + '.txt'
-		pop_spec_handle = open(population_spec_file, 'w')
-		pop_spec_handle.write('name\tpopulation\n')
-		for i, sc in enumerate(L):
-			pop_id = 'Clade_' + str(i+1)
-			for s in sc:
-				pop_spec_handle.write(s + '\t' + pop_id + '\n')
-		pop_spec_handle.close()
+		with open(population_spec_file, 'w') as pop_spec_handle:
+			pop_spec_handle.write('name\tpopulation\n')
+			for i, sc in enumerate(L):
+				pop_id = 'Clade_' + str(i+1)
+				for s in sc:
+					pop_spec_handle.write(s + '\t' + pop_id + '\n')
 
 		if rscript_file != None:
 			phylo_view_pdf_file = phylo_views_dir + 'Phylo_View_of_Population_Designations_' + str(ic) + '.pdf'
 
-			rscript_handle.write('track.data <- read.table("' + population_spec_file + '", header=F, sep="\t")\n')
+			rscript_handle.write('track.data <- read.table("' + population_spec_file + '", header=T, sep="\t")\n')
 			rscript_handle.write('colnames(track.data) <- c("name", "population")\n')
 			rscript_handle.write('tree.labels <- phylo.tree$tip.label\n')
-			rscript_handle.write('gg_tr <- ggtree(phylo.tree) + geom_tiplab() + ggtitle("Identity Cutoff' + str(ic) + '")\n')
+			rscript_handle.write('gg_tr <- ggtree(phylo.tree) + geom_tiplab() + ggtitle("Identity Cutoff ' + str(ic) + '")\n')
 			rscript_handle.write('gg_tr <- gg_tr %<+% track.data + geom_tippoint(aes(color=as.factor(population)), show.legend=T, size=3)\n')
 			rscript_handle.write('pdf("' + phylo_view_pdf_file + '", height=10, width=10)\n')
 			rscript_handle.write('gg_tr + coord_cartesian(clip="off")\n')
@@ -193,6 +197,20 @@ def popstrat():
 			phylo_view_files.append(phylo_view_pdf_file)
 
 	if rscript_file != None:
+		# interactive overview of population designations across all cutoffs tested
+		population_tracks = []
+		for ic in sorted(cutoffs, reverse=True):
+			sample_pops = {}
+			with open(poplist_dir + 'Sample_to_Population_' + str(ic) + '.txt') as opsf:
+				for i, line in enumerate(opsf):
+					if i == 0: continue
+					ls = line.strip().split('\t')
+					if len(ls) >= 2: sample_pops[ls[0]] = ls[1]
+			population_tracks.append(['AAI %s' % str(ic), sample_pops])
+		phyloplot.safely_create(phyloplot.population_overview_html, rooted_species_tree_file,
+								phylo_views_dir + 'Phylo_View_of_Population_Designations.html',
+								'popstrat: population designations at different core AAI cutoffs', population_tracks)
+
 		rscript_handle.close()
 		rscript_cmd = ['Rscript', rscript_file]
 		util.runCmdViaSubprocess(rscript_cmd, check_files=phylo_view_files)
@@ -202,6 +220,7 @@ def popstrat():
 	except Exception as e:
 		msg = 'Issue copying over the selected identity cutoff results to the main output directory.'
 		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc())
 		
 	# Done!
 	sys.exit(0)

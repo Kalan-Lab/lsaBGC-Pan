@@ -53,16 +53,16 @@ def create_parser():
 	ortholog group presence/absence data. Clustering uses MCL.
 	""", formatter_class=argparse.RawTextHelpFormatter)
 
-	parser.add_argument('-b', '--bgc_listings', help='BGC listing file. Tab delimited 3-column file: (1) sample name, (2) path\nto predicted BGC in Genbank format, (3) prediction software (either antismash or gecco).', required=True)
+	parser.add_argument('-b', '--bgc_listings', help='BGC listing file. Tab delimited 4-column file: (1) sample name, (2) path\nto predicted BGC in Genbank format, (3) prediction software (either antismash or gecco), (4) distance of the BGC\nto the nearest contig edge (bp).', required=True)
 	parser.add_argument('-m', '--orthofinder_matrix', help="Sample vs. ortholog matrix.", required=True)
 	parser.add_argument('-o', '--output_directory', help="Output directory.", required=True)
 	parser.add_argument('-i', '--mcl_inflation', type=float, help="Inflation parameter to be used for MCL [Default is 1.4].", required=False, default=1.4)
 	parser.add_argument('-j', '--jaccard_cutoff', type=float, help="Cutoff for Jaccard similarity of homolog groups shared between two BGCs [Default is 50.0].", required=False, default=50.0)
-	parser.add_argument('-r', '--syntenic_correlation_cutoff', type=float, help="Minimum absolute correlation coefficient between two BGCs [Default is 0.0].", required=False, default=0.0)
-	parser.add_argument('-y', '--containment_cutoff', type=float, help='Percentage of fragmented gene clusters OGs needed to be present in the comparing gene cluster to be considered a pair automatically - assumming syntenic similarity is also met [Default is 70.0]', required=False, default=70.0)
+	parser.add_argument('-r', '--syntenic_correlation_cutoff', type=float, help="Minimum absolute correlation coefficient of gene order between two BGCs, based on\nsingle-copy OGs they share (requires at least 3 shared; pairs with fewer are given\na correlation of 0.0) [Default is 0.0].", required=False, default=0.0)
+	parser.add_argument('-y', '--containment_cutoff', type=float, help='Percentage of fragmented gene clusters OGs needed to be present in the comparing gene cluster to be considered a pair automatically - assuming syntenic similarity is also met [Default is 70.0]', required=False, default=70.0)
 	parser.add_argument('-x', '--edge_distance_cutoff', type=int, help='Maximum distance to edge of contig to be considered fragmented [Default is 5000].', required=False, default=5000)
 	parser.add_argument('-s', '--split_by_annotation', action='store_true', help="Partition BGCs into groups based on annotation first.", required=False, default=False)
-	parser.add_argument('-t', '--run_parameter_tests', action='store_true', help="Run tests for selecting the best inflation parameter and jaccard for MCL analysis and exit.", required=False, default=False)
+	parser.add_argument('-t', '--run_parameter_tests', action='store_true', help="Run tests for selecting the best inflation parameter and jaccard cutoff for MCL analysis, then\nperform the final clustering with the specified -i and -j values.", required=False, default=False)
 	parser.add_argument('-c', '--threads', type=int, help="Number of threads to use for MCL step.", required=False, default=1)
 	args = parser.parse_args()
 	return args
@@ -82,10 +82,7 @@ def lsaBGC_Cluster():
 	outdir = os.path.abspath(myargs.output_directory) + '/'
 
 	### vet input files quickly
-	try:
-		assert(os.path.isfile(orthofinder_matrix_file))
-		assert(os.path.isfile(bgc_listings_file))
-	except Exception as e:
+	if not (os.path.isfile(orthofinder_matrix_file) and os.path.isfile(bgc_listings_file)):
 		raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
 
 	if os.path.isdir(outdir):
@@ -150,7 +147,7 @@ def lsaBGC_Cluster():
 	logObject.info('Calculating overlap in single copy ortholog Groups between BGC GBKs.')
 	mcl_outdir = outdir + 'MCL_intermediate_files/'
 	if not run_parameter_tests: mcl_outdir = outdir
-	elif not os.path.isdir(mcl_outdir): os.system('mkdir %s' % mcl_outdir)
+	else: os.makedirs(mcl_outdir, exist_ok=True)
 	Pan_Object.calculateBGCPairwiseRelations(mcl_outdir, split_by_annotation=split_by_annotation)
 	logObject.info("Successfully calculated pairwise distances between BGCs based on homolog profiles.")
 
@@ -169,6 +166,8 @@ def lsaBGC_Cluster():
 
 	if run_parameter_tests:
 		Pan_Object.plotResultsFromUsingDifferentParameters(outdir)
+		# start fresh GCF details files (with headers) for the final clustering with the requested parameters
+		Pan_Object.openStatsFile(outdir, run_parameter_tests=False)
 		Pan_Object.runMCLAndReportGCFs(mcl_inflation, jaccard_cutoff, syntenic_correlation_cutoff, containment_cutoff, outdir, run_parameter_tests=False, threads=threads)
 
 	logObject.info("Successfully ran MCL clustering analysis to determine eGCFs!")

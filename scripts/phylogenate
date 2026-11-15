@@ -65,7 +65,7 @@ def create_parser():
 	parser.add_argument('-mg', '--max_genes', type=int, help='The maximum number of single-copy core/near-core orthogroups to use for phylogeny building [Default is 500].', required=False, default=500)
 	parser.add_argument('-o', '--output_directory', help='Parent output/workspace directory.', required=True)
 	parser.add_argument('-hq', '--high_quality', action='store_true', help='Prioritize phylogeny accuracy over speed of construction. Uses muscle align instead of muscle super5 and IQ-TREE instead of FastTree2.', default=False, required=False)
-	parser.add_argument('-c', '--threads', type=int, help="Total number of threads/threads. Note, this is the total number of\nthreads to use. (Default is 1)", required=False, default=4)
+	parser.add_argument('-c', '--threads', type=int, help="Total number of threads. Note, this is the total number of\nthreads to use. (Default is 4)", required=False, default=4)
 
 	args = parser.parse_args()
 	return args
@@ -128,7 +128,7 @@ def phylogenate():
 	
 	subset_select_ogs = select_ogs
 	if len(select_ogs) > max_genes:
-		subset_select_ogs = set(random.sample(list(select_ogs), max_genes))
+		subset_select_ogs = set(random.Random(42).sample(sorted(select_ogs), max_genes))
 		msg = f'Selected {max_genes} random (near-)single-copy core orthogroups for phylogeny building.\n'
 		sys.stdout.write(msg)
 
@@ -152,9 +152,8 @@ def phylogenate():
 								og = genome_lt_to_og[sample][lt]
 								if not og in subset_select_ogs: continue
 								og_prot_faa = prot_dir + og + '.faa'
-								opf_handle = open(og_prot_faa, 'a+')
-								opf_handle.write('>' + sample + '\n' + str(prot_seq) + '\n')
-								opf_handle.close()
+								with open(og_prot_faa, 'a+') as opf_handle:
+									opf_handle.write('>' + sample + '\n' + str(prot_seq) + '\n')
 	
 	muscle_cmds = []
 	trimal_cmds = []
@@ -173,7 +172,7 @@ def phylogenate():
 
 	try:
 		with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_jobs_4thread) as executor:
-			executor.map(util.multiProcessNoLog, muscle_cmds)
+			list(executor.map(util.multiProcessNoLog, muscle_cmds))
 	except Exception as e:
 		msg = 'Issues running muscle in parallel!\n'
 		sys.stderr.write(msg)
@@ -182,7 +181,7 @@ def phylogenate():
 
 	try:
 		with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-			executor.map(util.multiProcessNoLog, trimal_cmds)
+			list(executor.map(util.multiProcessNoLog, trimal_cmds))
 	except Exception as e:
 		msg = 'Issues running trimal in parallel.\n'
 		sys.stderr.write(msg)
@@ -204,16 +203,15 @@ def phylogenate():
 		og_sequence_lengths[og_name] = trim_msa_len
 
 	concat_msa_file = outdir + 'Concatenated_MSA.fasta'
-	cmf_handle = open(concat_msa_file, 'w')
-	for genome in all_genomes:
-		concat_str = ''
-		for og in sorted(all_ogs):
-			if genome in genome_og_seqs and og in genome_og_seqs[genome]:
-				concat_str += genome_og_seqs[genome][og]
-			else:
-				concat_str += '-'*og_sequence_lengths[og]
-		cmf_handle.write('>' + genome + '\n' + concat_str + '\n')
-	cmf_handle.close()
+	with open(concat_msa_file, 'w') as cmf_handle:
+		for genome in all_genomes:
+			concat_str = ''
+			for og in sorted(all_ogs):
+				if genome in genome_og_seqs and og in genome_og_seqs[genome]:
+					concat_str += genome_og_seqs[genome][og]
+				else:
+					concat_str += '-'*og_sequence_lengths[og]
+			cmf_handle.write('>' + genome + '\n' + concat_str + '\n')
 
 	if high_qual_flag:
 		# take iqtree approach

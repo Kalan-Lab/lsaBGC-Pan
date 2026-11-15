@@ -89,17 +89,14 @@ def mapToMIBiG():
 	outdir = os.path.abspath(myargs.output_directory) + '/'
 
 	### vet input files quickly
-	try:
-		assert(os.path.isfile(orthofinder_matrix_file))
-		assert(os.path.isfile(lsabgc_detailed_listing))
-	except Exception as e:
+	if not (os.path.isfile(orthofinder_matrix_file) and os.path.isfile(lsabgc_detailed_listing)):
 		raise RuntimeError('One or more of the input files provided, does not exist. Exiting now ...')
 
 	if os.path.isdir(outdir):
 		sys.stderr.write("Output directory exists. Overwriting in 5 seconds ...\n ")
 		sleep(5)
 	else:
-		os.system('mkdir %s' % outdir)
+		os.makedirs(outdir, exist_ok=True)
 
 
 	zol_data_directory = str(os.getenv("ZOL_DATA_PATH")).strip()
@@ -158,7 +155,9 @@ def mapToMIBiG():
 	except Exception as e:
 		msg = "It appears the MIBiG database was not setup or setup successfully. Please run/rerun the script setup_annotation_dbs.py and report to Github issues if issue persists."
 		sys.stderr.write(msg + '\n')
+		sys.stderr.write(traceback.format_exc() + '\n')
 		logObject.error(msg)
+		logObject.error(traceback.format_exc())
 		sys.exit(1)
 
 	# Step 0: Log input arguments and update reference and query FASTA files.
@@ -167,22 +166,20 @@ def mapToMIBiG():
 	parameter_values = [gcf_id, lsabgc_detailed_listing, orthofinder_matrix_file, outdir,
 						identity_cutoff, coverage_cutoff, shared_cutoff, correlation_cutoff, draft_mode, threads]
 	parameter_names = ["Focal GCF ID", "Detailed BGC Information File", "Ortholog by Sample Matrix File", "Output Directory",
-					   "BGC Prediction Method", "MIBiG Protein to BGC Protein Identity Cutoff",
+					   "MIBiG Protein to BGC Protein Identity Cutoff",
 					   "MIBiG Protein to BGC Protein Coverage Cutoff", "MIBiG BGC to GCF BGC shared HGs Cutoff",
 					   "MIBiG BGC to GCF BGC Syntenic Correlation Cutoff", "Run in Draft Mode?", "threads"]
 	util.logParametersToFile(parameters_file, parameter_names, parameter_values)
 	logObject.info("Done saving parameters!")
 
 	gcf_listings_file = outdir + 'GCF_Listing.txt'
-	glf_handle = open(gcf_listings_file, 'w')
-	with open(lsabgc_detailed_listing) as oldlf:
+	with open(gcf_listings_file, 'w') as glf_handle, open(lsabgc_detailed_listing) as oldlf:
 		for i, line in enumerate(oldlf):
 			if i == 0: continue
 			line = line.strip()
 			sample, population, method, genome_path, bgc_id, bgc_path, bgc_type, line_gcf_id, scaffold, start, end, bgc_length, dist_to_edge = line.split('\t')
 			if line_gcf_id == gcf_id:
 				glf_handle.write('\t'.join([sample, bgc_path, method, dist_to_edge]) + '\n')
-	glf_handle.close()
 
 	# Step 1: Extract Proteins from BGCs belonging to GCF.
 	# Create GCF object
@@ -210,7 +207,7 @@ def mapToMIBiG():
 	except Exception as e:
 		logObject.error('Had an issue running: %s' % ' '.join(diamond_cmd))
 		logObject.error(traceback.format_exc())
-		raise RuntimeError('Had an issue running: %s' % ' '.join(diamond_cmd))
+		raise RuntimeError('Had an issue running: %s' % ' '.join(diamond_cmd)) from e
 
 	# Step 3: Parse OrthoFinder Homolog vs Sample Matrix and associate each homolog group with a color
 	logObject.info("Starting to parse OrthoFinder homolog vs sample information.")
@@ -280,104 +277,103 @@ def mapToMIBiG():
 
 	accounted_for_tups = set([])
 	result_file = outdir + 'GCF_to_MIBiG_Relations.txt'
-	rf_handle = open(result_file, 'w')
-	rf_handle.write('gcf_id\tmibig_bgc_id\tgcf_hg\tmibig_protein\n')
-	for mb in mibig_bgc_prots:
-		mbp_hg_counts = defaultdict(int)
-		for mbp in mibig_bgc_prots[mb]:
-			mbp_hg = mibig_prot_to_hg[mbp]
-			mbp_hg_counts[mbp_hg] += 1
-		mhg_info = {}
-		for mbp in mibig_bgc_prots[mb]:
-			mbp_hg = mibig_prot_to_hg[mbp]
-			if mbp_hg_counts[mbp_hg] != 1: continue
-			mhg_midpoint = sum([float(x) for x in mbp.split('|')[2].split('-')])/2.0
-			mhg_strand = mbp.split('|')[3]
-			mhg_info[mbp_hg] = [mhg_midpoint, mhg_strand, mbp]
-		if draft_mode:
-			for samp in sample_hgs:
-				gcf_samp_shared_prop = (len(sample_hgs[samp].intersection(set(mhg_info.keys())))/float(len(sample_hgs[samp])))*100.0
-				gcf_samp_shared = len(sample_hgs[samp].intersection(set(mhg_info.keys())))
-				if gcf_samp_shared >= shared_cutoff:
-					mibig_prot_hg_tup = tuple([mhg_info[hg][2], hg])
-					if not mibig_prot_hg_tup in accounted_for_tups:
-						rf_handle.write('\t'.join([gcf_id, mb, hg, mhg_info[hg][2]]) + '\n')
-					accounted_for_tups.add(mibig_prot_hg_tup)
-		else:
-			for bgc in bgc_hgs:
-				sample = GCF_Object.bgc_sample[bgc]
-				bgc_shared_prop = ((len(bgc_hgs[bgc].intersection(set(mhg_info.keys()))))/float(len(bgc_hgs[bgc])))*100.0
-				bgc_shared = len(bgc_hgs[bgc].intersection(set(mhg_info.keys())))
-				if bgc_shared >= shared_cutoff:
-					best_corr = None
-					mib_hg_order = []
-					mib_hg_direction = []
-					ref_hg_order = []
-					ref_hg_direction = []
-
-					for hg in mhg_info:
-						mhg_midpoint, mhg_strand, mbp = mhg_info[hg]
-						mib_hg_order.append(mhg_midpoint)
-						mib_hg_direction.append(mhg_strand)
-						lt_matching = []
-						for lt in GCF_Object.hg_genes[hg]:
-							if lt in GCF_Object.bgc_genes[bgc]:
-								lt_matching.append(lt)
-						if len(lt_matching) == 1:
-							ref_lt_midpoint = (GCF_Object.comp_gene_info[lt]['start'] + GCF_Object.comp_gene_info[lt]['end'])/2.0
-							ref_lt_direction = (GCF_Object.comp_gene_info[lt]['direction'])
-							ref_hg_order.append(ref_lt_midpoint)
-							ref_hg_direction.append(ref_lt_direction)
-						else:
-							ref_hg_order.append(None)
-							ref_hg_direction.append(None)
-
-					best_corr = None
-					try:
-						list1_same_dir = []
-						list2_same_dir = []
-						list1_comp_dir = []
-						list2_comp_dir = []
-						for iter, hgval1 in enumerate(mib_hg_order):
-							hgdir1 = mib_hg_direction[iter]
-							hgval2 = ref_hg_order[iter]
-							hgdir2 = ref_hg_direction[iter]
-							if hgval1 == None or hgval2 == None: continue
-							if hgdir1 == None or hgdir2 == None: continue
-							if hgdir1 == hgdir2:
-								list1_same_dir.append(hgval1)
-								list2_same_dir.append(hgval2)
-							else:
-								list1_comp_dir.append(hgval1)
-								list2_comp_dir.append(hgval2)
-
-						if len(list1_same_dir) >= 3:
-							corr, pval = stats.pearsonr(list1_same_dir, list2_same_dir)
-							corr = abs(corr)
-							if (pval < 0.1) and ((best_corr and best_corr < corr) or (not best_corr)):
-								best_corr = corr
-						if len(list1_comp_dir) >= 3:
-							corr, pval = stats.pearsonr(list1_comp_dir, list2_comp_dir)
-							corr = abs(corr)
-							if (pval < 0.1) and ((best_corr and best_corr < corr) or (not best_corr)):
-								best_corr = corr
-					except Exception as e:
-						raise RuntimeError(traceback.format_exc())
-
-					if best_corr != None and best_corr >= correlation_cutoff:
-						for hg in mhg_info:
+	with open(result_file, 'w') as rf_handle:
+		rf_handle.write('gcf_id\tmibig_bgc_id\tgcf_hg\tmibig_protein\n')
+		for mb in mibig_bgc_prots:
+			mbp_hg_counts = defaultdict(int)
+			for mbp in mibig_bgc_prots[mb]:
+				mbp_hg = mibig_prot_to_hg[mbp]
+				mbp_hg_counts[mbp_hg] += 1
+			mhg_info = {}
+			for mbp in mibig_bgc_prots[mb]:
+				mbp_hg = mibig_prot_to_hg[mbp]
+				if mbp_hg_counts[mbp_hg] != 1: continue
+				mhg_midpoint = sum([float(x) for x in mbp.split('|')[2].split('-')])/2.0
+				mhg_strand = mbp.split('|')[3]
+				mhg_info[mbp_hg] = [mhg_midpoint, mhg_strand, mbp]
+			if draft_mode:
+				for samp in sample_hgs:
+					gcf_samp_shared_prop = (len(sample_hgs[samp].intersection(set(mhg_info.keys())))/float(len(sample_hgs[samp])))*100.0
+					gcf_samp_shared = len(sample_hgs[samp].intersection(set(mhg_info.keys())))
+					if gcf_samp_shared >= shared_cutoff:
+						for hg in sorted(sample_hgs[samp].intersection(set(mhg_info.keys()))):
 							mibig_prot_hg_tup = tuple([mhg_info[hg][2], hg])
 							if not mibig_prot_hg_tup in accounted_for_tups:
 								rf_handle.write('\t'.join([gcf_id, mb, hg, mhg_info[hg][2]]) + '\n')
 							accounted_for_tups.add(mibig_prot_hg_tup)
+			else:
+				for bgc in bgc_hgs:
+					sample = GCF_Object.bgc_sample[bgc]
+					bgc_shared_prop = ((len(bgc_hgs[bgc].intersection(set(mhg_info.keys()))))/float(len(bgc_hgs[bgc])))*100.0
+					bgc_shared = len(bgc_hgs[bgc].intersection(set(mhg_info.keys())))
+					if bgc_shared >= shared_cutoff:
+						best_corr = None
+						mib_hg_order = []
+						mib_hg_direction = []
+						ref_hg_order = []
+						ref_hg_direction = []
 
-	rf_handle.close()
+						for hg in mhg_info:
+							mhg_midpoint, mhg_strand, mbp = mhg_info[hg]
+							mib_hg_order.append(mhg_midpoint)
+							mib_hg_direction.append(mhg_strand)
+							lt_matching = []
+							for lt in GCF_Object.hg_genes[hg]:
+								if lt in GCF_Object.bgc_genes[bgc]:
+									lt_matching.append(lt)
+							if len(lt_matching) == 1:
+								lt = lt_matching[0]
+								ref_lt_midpoint = (GCF_Object.comp_gene_info[lt]['start'] + GCF_Object.comp_gene_info[lt]['end'])/2.0
+								ref_lt_direction = (GCF_Object.comp_gene_info[lt]['direction'])
+								ref_hg_order.append(ref_lt_midpoint)
+								ref_hg_direction.append(ref_lt_direction)
+							else:
+								ref_hg_order.append(None)
+								ref_hg_direction.append(None)
+
+						best_corr = None
+						try:
+							list1_same_dir = []
+							list2_same_dir = []
+							list1_comp_dir = []
+							list2_comp_dir = []
+							for iter, hgval1 in enumerate(mib_hg_order):
+								hgdir1 = mib_hg_direction[iter]
+								hgval2 = ref_hg_order[iter]
+								hgdir2 = ref_hg_direction[iter]
+								if hgval1 == None or hgval2 == None: continue
+								if hgdir1 == None or hgdir2 == None: continue
+								if hgdir1 == hgdir2:
+									list1_same_dir.append(hgval1)
+									list2_same_dir.append(hgval2)
+								else:
+									list1_comp_dir.append(hgval1)
+									list2_comp_dir.append(hgval2)
+
+							if len(list1_same_dir) >= 3:
+								corr, pval = stats.pearsonr(list1_same_dir, list2_same_dir)
+								corr = abs(corr)
+								if (pval < 0.1) and ((best_corr and best_corr < corr) or (not best_corr)):
+									best_corr = corr
+							if len(list1_comp_dir) >= 3:
+								corr, pval = stats.pearsonr(list1_comp_dir, list2_comp_dir)
+								corr = abs(corr)
+								if (pval < 0.1) and ((best_corr and best_corr < corr) or (not best_corr)):
+									best_corr = corr
+						except Exception as e:
+							raise RuntimeError(traceback.format_exc()) from e
+
+						if best_corr != None and best_corr >= correlation_cutoff:
+							for hg in mhg_info:
+								mibig_prot_hg_tup = tuple([mhg_info[hg][2], hg])
+								if not mibig_prot_hg_tup in accounted_for_tups:
+									rf_handle.write('\t'.join([gcf_id, mb, hg, mhg_info[hg][2]]) + '\n')
+								accounted_for_tups.add(mibig_prot_hg_tup)
 
 	# Write checkpoint file for lsaBGC-AutoAnalyze.py
 	checkpoint_file = outdir + 'CHECKPOINT.txt'
-	checkpoint_handle = open(checkpoint_file, 'w')
-	checkpoint_handle.write('lsaBGC-MIBiGMapper completed successfully!')
-	checkpoint_handle.close()
+	with open(checkpoint_file, 'w') as checkpoint_handle:
+		checkpoint_handle.write('lsaBGC-MIBiGMapper completed successfully!')
 
 	# Close logging object and exit
 	util.closeLoggerObject(logObject)
