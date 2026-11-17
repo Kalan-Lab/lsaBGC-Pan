@@ -332,7 +332,8 @@ def runZol(detailed_BGC_listing_with_Pop_and_GCF_map_file, ortholog_listing_file
 	
 		zp = zol_parameters
 		if zol_high_quality_preset:
-			zp = '-qa -s -b'
+			# zol >= 1.7.0 replaced -qa/--quality-align with -am/--aligner-method (MUSCLE5 -align is the accurate option)
+			zp = '-am muscle -s -b'
 
 		for gcf in gcf_sample_bgcs:
 			gcf_bgcs_to_input = []
@@ -1653,7 +1654,7 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 		sys.exit(1)
 	return result_file
 
-def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, results_directory, logObject, threads=1):
+def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, results_directory, logObject, threads=1, ignore_upperbound_limit=False):
 	"""
 	Definition:
 	Wrapper function to run bofasa (https://github.com/raufs/bofasa) for multi-species bacterial orthology inference.
@@ -1665,6 +1666,7 @@ def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, resu
 	- results_directory: The output directory for "bofasa run".
 	- logObject: A python logging object.
 	- threads (optional): The number of threads to use. Default is 1.
+	- ignore_upperbound_limit (optional): Pass --ignore-upperbound-limit to bofasa prep to allow > 200 genomes.
 	********************************************************************************************************************
 	Returns:
 	- result_file: The resulting orthogroup by sample carriage matrix.
@@ -1690,6 +1692,9 @@ def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, resu
 
 		# locus tags in the lsaBGC-Pan GenBank files are retained since --rename-locus-tags is not specified.
 		prep_cmd = ['bofasa', 'prep', '-i', ' '.join(bofasa_inputs), '-o', bofasa_prep_dir, '-c', str(threads), '-y']
+		if ignore_upperbound_limit:
+			# bofasa prep has its own upper limit of 200 genomes
+			prep_cmd.append('--ignore-upperbound-limit')
 		runCmdViaSubprocess(prep_cmd, logObject=logObject, check_directories=[bofasa_prep_dir],
 							stdout=bofasa_prep_dir.rstrip('/') + '.stdout.log', stderr=bofasa_prep_dir.rstrip('/') + '.stderr.log')
 
@@ -2217,6 +2222,10 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			'OG Consensus Direction',
 			'PGAP Annotation (E-value)',
 			'Pfam Domains',
+			'Average Pairwise Nucleotide Identity',
+			'Average Pairwise Protein Identity',
+			'Std Dev of Pairwise Protein Identity',
+			'Protein to Nucleotide Identity Ratio',
 			'Tajima\'s D',
 			'Proportion of Filtered Codon Alignment is Segregating Sites',
 			'Entropy',
@@ -2316,6 +2325,10 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			'Proportion of Complete Gene Cluster Instances with OG',
 			'OG Median Length (bp)',
 			'OG Consensus Order',
+			'Average Pairwise Nucleotide Identity',
+			'Average Pairwise Protein Identity',
+			'Std Dev of Pairwise Protein Identity',
+			'Protein to Nucleotide Identity Ratio',
 			'Tajima\'s D',
 			'GARD Partitions Based on Recombination Breakpoints',
 			'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
@@ -2374,10 +2387,16 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 				cell_range = f"{col_map[col_name]}2:{col_map[col_name]}{num_rows}"
 				zr_sheet.conditional_format(cell_range, fmt_dict)
 
-		# Apply coloring similar to zol v1.6.9 using dynamic mapping
+		# Apply coloring similar to zol v1.7.0 using dynamic mapping
 		_fmt_if('Proportion of Total Gene Clusters with OG', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#CCCCCC", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
 		_fmt_if('Proportion of Complete Gene Cluster Instances with OG', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#CCCCCC", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
 		_fmt_if('OG Median Length (bp)', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#5A8AC6", "min_value": 100, "max_value": 2500, "min_type": "num", "max_type": "num"})
+
+		# Pairwise identity statistics (added in zol v1.7.0; percentages) - coloring matches zol
+		for identity_col in ['Average Pairwise Nucleotide Identity', 'Average Pairwise Protein Identity']:
+			_fmt_if(identity_col, {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#A5D6E3", "min_value": 40.0, "max_value": 90.0, "min_type": "num", "max_type": "num"})
+		_fmt_if('Std Dev of Pairwise Protein Identity', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#F86B6B", "min_value": 0.0, "max_value": 100.0, "min_type": "num", "max_type": "num"})
+		_fmt_if('Protein to Nucleotide Identity Ratio', {"type": "3_color_scale", "min_color": "#E6B0AA", "mid_color": "#FFFFFF", "max_color": "#B8CCE4", "min_value": 0.5, "mid_value": 1.0, "max_value": 1.5, "min_type": "num", "mid_type": "num", "max_type": "num"})
 
 		_fmt_if('Tajima\'s D', {"type": "3_color_scale", "min_color": "#E6B0AA", "mid_color": "#FFFFFF", "max_color": "#B8CCE4", "min_value": -2.0, "mid_value": 0.0, "max_value": 2.0, "min_type": "num", "mid_type": "num", "max_type": "num"})
 		_fmt_if('Proportion of Filtered Codon Alignment is Segregating Sites', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#A37BA8", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
@@ -2392,7 +2411,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			_fmt_if('Median Beta-RD-gc', {"type": "3_color_scale", "min_color": "#F8696B", "mid_color": "#FFEB84", "max_color": "#63BE7B", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25, "min_type": "num", "mid_type": "num", "max_type": "num"})
 			_fmt_if('Max Beta-RD-gc', {"type": "3_color_scale", "min_color": "#F8696B", "mid_color": "#FFEB84", "max_color": "#63BE7B", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25, "min_type": "num", "mid_type": "num", "max_type": "num"})
 
-		# HyPhy (zol high-quality preset) columns coloring to match zol v1.6.9
+		# HyPhy (zol high-quality preset) columns coloring to match zol v1.7.0
 		if 'GARD Partitions Based on Recombination Breakpoints' in col_map:
 			cell_range = f"{col_map['GARD Partitions Based on Recombination Breakpoints']}2:{col_map['GARD Partitions Based on Recombination Breakpoints']}{num_rows}"
 			zr_sheet.conditional_format(cell_range, {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#F8696B", "min_value": 1, "max_value": 5, "min_type": "num", "max_type": "num"})

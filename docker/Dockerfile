@@ -22,9 +22,9 @@ RUN apt-get update && apt-get install -y git wget gcc && \
 # Set env variables and download minimal databases (MIBiG v3.1 + PGAP HMMs)
 ENV PATH /usr/src/lsaBGC_conda_env/bin:$PATH
 ENV ZOL_EXEC_PATH /usr/src/lsaBGC_conda_env/bin/
-ENV ZOL_DATA_PATH /usr/src/lsaBGC_conda_env/share/zol-1.6.3/db/
+ENV ZOL_DATA_PATH /usr/src/lsaBGC_conda_env/share/zol/db/
 ENV BOFASA_DB_PATH /usr/src/lsaBGC_conda_env/share/bofasa/db/
-RUN printf "yes\n" | setup_annotation_dbs.py -ld && \
+RUN setup_annotation_dbs.py -ld -y && \
     mkdir -p ${BOFASA_DB_PATH} && bofasa setup --skip-genomad --force -y && \
     chmod 777 /home
 USER 1000:1000

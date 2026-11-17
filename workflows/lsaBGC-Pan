@@ -101,6 +101,30 @@ Finally, please try re-running lsaBGC-Pan again!
 		sys.exit(1)
 
 
+def checkZolVersion(minimum_version='1.7.0'):
+	"""
+	Check that the installed zol is at least the minimum version lsaBGC-Pan is written for. Exits with guidance if not.
+	"""
+	try:
+		from importlib.metadata import version as package_version
+		zol_version = package_version('zol')
+	except Exception:
+		sys.stderr.write('[ERROR] zol does not appear to be installed in this environment, please install zol >= %s!\n' % minimum_version)
+		sys.exit(1)
+	def version_tuple(v):
+		return tuple(int(''.join(c for c in x if c.isdigit()) or 0) for x in v.split('.')[:3])
+	if version_tuple(zol_version) < version_tuple(minimum_version):
+		sys.stderr.write("""
+[ERROR] zol version %s is installed, but lsaBGC-Pan requires zol >= %s! 
+
+> Please update zol in your lsaBGC-Pan conda environment:
+$ conda install -c conda-forge -c bioconda "zol>=%s"
+
+Then, please try re-running lsaBGC-Pan again!
+""" % (zol_version, minimum_version, minimum_version))
+		sys.exit(1)
+
+
 def create_parser():
 	""" Parse arguments """
 	parser = ArgumentParser(description="""
@@ -129,6 +153,7 @@ def create_parser():
       from 4-200 genomes.
           - Consider using tools for dereplication/strain-clustering (such as skDER/CiDDER, dRep, PopPunk, 
             or treemmer) to prune down your set of genomes if you have more than 200.
+          - Alternatively, the upper limit can be lifted with --ignore-upperbound-limit (-x).
     * Panaroo should only be used if working with genomes belonging to a single bacterial species. If working 
       with multiple bacterial species, consider using bofasa (or OrthoFinder). For fungal genomes, please use 
       OrthoFinder.
@@ -211,11 +236,12 @@ def create_parser():
 	parser.add_argument('-cr', '--cluster-syntenic-correlation', type=float, help='The minimal absolute correlation coefficient of gene order (for single-copy\northogroups shared, at least 3 needed) between two BGCs required for\nconsidering them as a pair prior to MCL [Default is 0.4].', required=False, default=0.4)
 	parser.add_argument('-cc', '--cluster-containment', type=float, help="Cutoff for percentage of OGs for a gene cluster near a contig edge\nto be found within the comparing gene cluster for the pair to be\nconsidered in MCL (the syntenic correlation cutoff must still be met) [Default\nis 70.0]", required=False, default=70.0)
 
+	parser.add_argument('-x', '--ignore-upperbound-limit', action='store_true', help='Allow analysis of more than 200 genomes (also passes --ignore-upperbound-limit\nto bofasa if it is used). Runtime and memory can grow substantially, consider\ndereplicating genomes (e.g. with skDER/CiDDER) first.', required=False, default=False)
 	parser.add_argument('-y', '--yes', '--resume', dest='yes', action='store_true', help='Automatically continue (resume) if the output directory already exists\ninstead of prompting - checkpoint files will be used to skip completed\nsteps. Needed for resuming in non-interactive settings (e.g. Docker\nor batch jobs), such as after the break following step 5.', required=False, default=False)
 	parser.add_argument('-nb', '--no-break', action='store_true', help='No break after step 5 to assess GCF clustering and population\nstratification and adapt parameters.', required=False, default=False)
 
-	parser.add_argument('-zp', '--zol-parameters', help="The parameters to run zol analyses with - please surround by quotes\n[Default is \"\"].", default="")
-	parser.add_argument('-zhq', '--zol-high-quality-preset', action='store_true', help='Use preset of options for performing high-quality and comprehensive zol\nanalyses instead of prioritizing speed.')
+	parser.add_argument('-zp', '--zol-parameters', help="The parameters to run zol analyses with - please surround by quotes,\ne.g. \"-am muscle\" (requires zol >= 1.7.0) [Default is \"\"].", default="")
+	parser.add_argument('-zhq', '--zol-high-quality-preset', action='store_true', help='Use preset of options for performing high-quality and comprehensive zol\nanalyses instead of prioritizing speed (runs zol with: -am muscle -s -b).')
 	parser.add_argument('-zl', '--zol-keep-multi-copy', action='store_true', help='Include all GCF instances in zol analysis, not just the most\nrepresentative instance from each sample/genome.', required=False, default=False)
 	
 	parser.add_argument('-ed', '--edge-distance', type=int, help="Distance in bp to scaffold/contig edge to be considered potentially\nfragmented. Used in GCF clustering (related to --cluster-containment\nparameter) and zol conservation computations [Default is 5000].", required=False, default=5000)
@@ -261,6 +287,8 @@ def lsaBGC():
 	use_prodigal = myargs.use_prodigal
 	no_break_flag = myargs.no_break
 	keep_lt_flag = myargs.keep_locus_tags
+	ignore_upperbound_limit_flag = myargs.ignore_upperbound_limit
+	max_genomes = None if ignore_upperbound_limit_flag else 200
 
 	use_panaroo_flag = myargs.use_panaroo
 	use_bofasa_flag = myargs.use_bofasa
@@ -481,6 +509,9 @@ Then, please try re-running lsaBGC-Pan again!
 		checkOrthoFinderSetup()
 
 
+	# zol >= 1.7.0 is required (e.g. -qa/--quality-align was replaced by -am/--aligner-method)
+	checkZolVersion()
+
 	parallel_jobs_4thread = max(math.floor(threads / 4), 1)
 	multi_thread = 4
 	if threads < 4:
@@ -569,10 +600,10 @@ is experimental and might cause issues.
 					sys.stderr.write(msg + '\n')
 					logObject.warning(msg)
 
-			if sample_count < 4 or sample_count > 200:
+			if sample_count < 4 or (max_genomes != None and sample_count > max_genomes):
 				msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Only found %d genomes.' % sample_count
-				if sample_count > 200:
-					msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Found %d genomes.' % sample_count
+				if sample_count >= 4:
+					msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Found %d genomes. Use --ignore-upperbound-limit (-x) to analyze more than 200 genomes.' % sample_count
 				sys.stderr.write(msg + '\n')
 				logObject.error(msg)
 				sys.exit(1)
@@ -685,10 +716,10 @@ is experimental and might cause issues.
 
 				sample_count = len(sample_genomes)
 				
-				if sample_count < 4 or sample_count > 200:
+				if sample_count < 4 or (max_genomes != None and sample_count > max_genomes):
 					msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Only found %d genomes.' % sample_count
-					if sample_count > 200:
-						msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Found %d genomes.' % sample_count
+					if sample_count >= 4:
+						msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Found %d genomes. Use --ignore-upperbound-limit (-x) to analyze more than 200 genomes.' % sample_count
 					sys.stderr.write(msg + '\n')
 					logObject.error(msg)
 					sys.exit(1)
@@ -835,10 +866,10 @@ is experimental and might cause issues.
 				run_prodigal_cmds.append(rpc)
 			
 			sample_count = len(sample_genomes)
-			if sample_count < 4 or sample_count > 200:
+			if sample_count < 4 or (max_genomes != None and sample_count > max_genomes):
 				msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Only found %d genomes.' % sample_count
-				if sample_count > 200:
-					msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Found %d genomes.' % sample_count
+				if sample_count >= 4:
+					msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Found %d genomes. Use --ignore-upperbound-limit (-x) to analyze more than 200 genomes.' % sample_count
 				sys.stderr.write(msg + '\n')
 				logObject.error(msg)
 				sys.exit(1)
@@ -955,7 +986,7 @@ is experimental and might cause issues.
 				if os.path.isdir(d):
 					shutil.rmtree(d)
 
-			og_results_matrix = util.runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, bofasa_results_dir, logObject, threads=threads)
+			og_results_matrix = util.runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, bofasa_results_dir, logObject, threads=threads, ignore_upperbound_limit=ignore_upperbound_limit_flag)
 			if og_results_matrix and os.path.isfile(og_results_matrix):
 				shutil.move(og_results_matrix, ortholog_matrix_file)
 		elif not use_panaroo_flag:
