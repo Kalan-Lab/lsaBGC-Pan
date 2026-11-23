@@ -235,7 +235,9 @@ class Pan:
 
 				pairwise_relations = defaultdict(lambda: defaultdict(float))
 				pairwise_containment_relations = defaultdict(lambda: defaultdict(float))
-				pairwise_syntenic_relations = defaultdict(lambda: defaultdict(lambda: 0.0))
+				# gene-order correlation is only computed (and stored) for pairs sharing >= 3 single-copy OGs; pairs
+				# without an entry could not be assessed for synteny.
+				pairwise_syntenic_relations = defaultdict(dict)
 
 				bgc_hg_ranked_orders = defaultdict(dict)
 				for bgc in self.bgc_hgs:
@@ -315,29 +317,40 @@ class Pan:
 		- threads: number of threads/threads to use for MCL.
 		********************************************************************************************************************
 		"""
-		pair_relations_filt_txt_file = outdir + 'bgc_pair_relationships.txt' 
+		# parameter test runs write their own intermediate files so results can never be carried over from (stale files of)
+		# a previous parameter combination; the final clustering keeps the established file names.
+		file_tag = ''
+		if run_parameter_tests:
+			file_tag = '.I%s_J%s' % (str(mip).replace('.', '_'), str(jcp).replace('.', '_'))
+		pair_relations_filt_txt_file = outdir + 'bgc_pair_relationships' + file_tag + '.txt'
 		try:
 			with open(pair_relations_filt_txt_file, 'w') as prftf_handle:
 				pairs_kept = 0
 				pairs_failing_synteny = 0
+				pairs_synteny_not_assessable = 0
 				with open(self.pair_relations_txt_file) as oprtf:
 					for line in oprtf:
 						line = line.strip('\n')
 						b1, b2, jaccard_sim = line.split('\t')
+						# pairs which share no ortholog groups are never linked
+						if float(jaccard_sim) <= 0.0: continue
 						passes_overlap = (float(jaccard_sim) >= jcp or
 										  (self.bgc_edgy[b1] == True and self.pairwise_containment_relations[b1][b2] >= ccp) or
 										  (self.bgc_edgy[b2] == True and self.pairwise_containment_relations[b2][b1] >= ccp))
 						if not passes_overlap: continue
-						# require syntenic correspondence: absolute correlation of gene order for single-copy ortholog
-						# groups shared between the pair (computed only when >= 3 such ortholog groups are shared,
-						# otherwise it is 0.0).
-						if self.pairwise_syntenic_relations[b1][b2] >= sccp:
-							prftf_handle.write(line + '\n')
-							pairs_kept += 1
-						else:
+						# require syntenic correspondence where it can be assessed: absolute correlation of gene order for
+						# the single-copy ortholog groups shared between the pair (only computed when >= 3 such ortholog
+						# groups are shared). Pairs sharing fewer cannot be assessed and are judged by overlap alone.
+						syntenic_correlation = self.pairwise_syntenic_relations[b1].get(b2)
+						if syntenic_correlation is None:
+							pairs_synteny_not_assessable += 1
+						elif syntenic_correlation < sccp:
 							pairs_failing_synteny += 1
+							continue
+						prftf_handle.write(line + '\n')
+						pairs_kept += 1
 			if self.logObject:
-				self.logObject.info('For MCL inflation %s and Jaccard cutoff %s: %d BGC pairs retained for MCL, %d pairs meeting overlap criteria were removed for not meeting the syntenic correlation cutoff of %s.' % (str(mip), str(jcp), pairs_kept, pairs_failing_synteny, str(sccp)))
+				self.logObject.info('For MCL inflation %s and Jaccard cutoff %s: %d BGC pairs retained for MCL (%d of which share too few single-copy OGs to assess synteny), %d pairs meeting overlap criteria were removed for not meeting the syntenic correlation cutoff of %s.' % (str(mip), str(jcp), pairs_kept, pairs_synteny_not_assessable, pairs_failing_synteny, str(sccp)))
 		except Exception as e:
 			if self.logObject:
 				self.logObject.warning("Problem with parsing paired sample Jaccard similarity relationship file.")
@@ -345,10 +358,13 @@ class Pan:
 			#raise RuntimeWarning(traceback.format_exc())
 			return
 		
-		pair_relations_mci_file = outdir + 'bgc_pair_relationships.mci'
-		pair_relations_tab_file = outdir + 'bgc_pair_relationships.tab'
-		relations_mcl_file = outdir + 'mcl.' + str(mip).replace('.', '_') + '.out'
-		mcxdump_out_file = outdir + 'final_mcl.' + str(mip).replace('.', '_') + '.out'
+		pair_relations_mci_file = outdir + 'bgc_pair_relationships' + file_tag + '.mci'
+		pair_relations_tab_file = outdir + 'bgc_pair_relationships' + file_tag + '.tab'
+		relations_mcl_file = outdir + 'mcl.' + str(mip).replace('.', '_') + file_tag + '.out'
+		mcxdump_out_file = outdir + 'final_mcl.' + str(mip).replace('.', '_') + file_tag + '.out'
+		for f in [pair_relations_mci_file, pair_relations_tab_file, relations_mcl_file, mcxdump_out_file]:
+			if os.path.isfile(f):
+				os.remove(f)
 
 		mcxload_cmd = ['mcxload', '-abc', pair_relations_filt_txt_file, '--stream-mirror', '-write-tab',
 					   pair_relations_tab_file,
@@ -357,54 +373,26 @@ class Pan:
 		mcxdump_cmd = ['mcxdump', '-icl', relations_mcl_file, '-tabr', pair_relations_tab_file, '-o',
 					   mcxdump_out_file]
 
-		if self.logObject:
-			self.logObject.info('Running the following command: %s' % ' '.join(mcxload_cmd))
-		try:
-			subprocess.call(' '.join(mcxload_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-							executable='/bin/bash')
+		if pairs_kept == 0:
+			# no BGC pairs to cluster - all BGCs are singletons for this parameter combination
+			open(mcxdump_out_file, 'w').close()
 			if self.logObject:
-				self.logObject.info('Successfully ran: %s' % ' '.join(mcxload_cmd))
-		except Exception as e:
-			if self.logObject:
-				self.logObject.warning('Had an issue running: %s' % ' '.join(mcxload_cmd))
-				self.logObject.warning(traceback.format_exc())
-			#raise RuntimeWarning('Had an issue running: %s' % ' '.join(mcxload_cmd))
-			return
-		
-		if self.logObject:
-			self.logObject.info('Converted format of pair relationship file via mcxload.')
+				self.logObject.info('No BGC pairs met the clustering criteria - all BGCs are singletons for MCL inflation %s and Jaccard cutoff %s.' % (str(mip), str(jcp)))
+		else:
+			for cmd, expected_file in [[mcxload_cmd, pair_relations_mci_file], [mcl_cmd, relations_mcl_file],
+									   [mcxdump_cmd, mcxdump_out_file]]:
+				if self.logObject:
+					self.logObject.info('Running the following command: %s' % ' '.join(cmd))
+				return_code = subprocess.call(' '.join(cmd), shell=True, stdout=subprocess.DEVNULL,
+											  stderr=subprocess.DEVNULL, executable='/bin/bash')
+				if return_code != 0 or not os.path.isfile(expected_file):
+					msg = 'Had an issue running (return code %d): %s' % (return_code, ' '.join(cmd))
+					if self.logObject:
+						self.logObject.error(msg)
+					raise RuntimeError(msg)
+				if self.logObject:
+					self.logObject.info('Successfully ran: %s' % ' '.join(cmd))
 
-		if self.logObject:
-			self.logObject.info('Running MCL and MCXDUMP with inflation parameter set to %f' % mip)
-			self.logObject.info('Running the following command: %s' % ' '.join(mcl_cmd))
-		try:
-			subprocess.call(' '.join(mcl_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-							executable='/bin/bash')
-			assert (os.path.isfile(relations_mcl_file)) # and os.path.getsize(relations_mcl_file) > 50)
-			if self.logObject:
-				self.logObject.info('Successfully ran: %s' % ' '.join(mcl_cmd))
-		except Exception as e:
-			if self.logObject:
-				self.logObject.warning('Had an issue running: %s' % ' '.join(mcl_cmd))
-				self.logObject.warning(traceback.format_exc())
-			#raise RuntimeWarning('Had an issue running: %s' % ' '.join(mcl_cmd))
-			return
-		
-		if self.logObject:
-			self.logObject.info('Running the following command: %s' % ' '.join(mcxdump_cmd))
-		try:
-			subprocess.call(' '.join(mcxdump_cmd), shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-							executable='/bin/bash')
-			assert (os.path.isfile(mcxdump_out_file)) # and os.path.getsize(mcxdump_out_file) > 50)
-			if self.logObject:
-				self.logObject.info('Successfully ran: %s' % ' '.join(mcxdump_cmd))
-		except Exception as e:
-			if self.logObject:
-				self.logObject.warning('Had an issue running: %s' % ' '.join(mcxdump_cmd))
-				self.logObject.warning(traceback.format_exc())
-			#raise RuntimeWarning('Had an issue running: %s' % ' '.join(mcxdump_cmd))
-			return
-		
 		if self.logObject:
 			self.logObject.info('Successfully ran MCL and MCXDUMP with inflation parameter set to %f!' % mip)
 
@@ -691,21 +679,25 @@ class Pan:
 																	 [gcf_id + ' - ' + param_mod_id, param_mod_id, an,
 																	  an_count, tot_count]]) + '\n')
 
-				for pid in clustered_counts:
+				# include parameter combinations for which no GCFs (only singletons) were found too
+				for pid in sorted(set(clustered_counts.keys()).union(set(singleton_counts.keys())),
+								  key=lambda x: [float(y) for y in x.split('_')]):
 					mcl, jcp = [float(x) for x in pid.split('_')]
 					param_mod_id = 'MCL Inflation: %.1f; Jaccard Similarity Cutoff: %.1f' % (mcl, jcp)
+					singleton_ratio = 'NA'
+					if clustered_counts[pid] > 0:
+						singleton_ratio = singleton_counts[pid] / float(clustered_counts[pid])
+					mixed_prop, mixed_wohypo_prop = 'NA', 'NA'
+					if cluster_counts[pid] > 0:
+						mixed_prop = cluster_mixedannot_counts[pid] / float(cluster_counts[pid])
+						mixed_wohypo_prop = cluster_mixedannot_wohypo_counts[pid] / float(cluster_counts[pid])
 
 					plot_overview_handle.write(
 						'\t'.join([str(x) for x in [param_mod_id, jcp, mcl, clustered_counts[pid],
-													singleton_counts[pid],
-													singleton_counts[pid] / clustered_counts[pid],
+													singleton_counts[pid], singleton_ratio,
 													cluster_mixedannot_counts[pid],
 													cluster_mixedannot_wohypo_counts[pid],
-													cluster_counts[pid],
-													cluster_mixedannot_counts[pid] / float(
-														cluster_counts[pid]),
-													cluster_mixedannot_wohypo_counts[pid] / float(
-														cluster_counts[pid])]]) + '\n')
+													cluster_counts[pid], mixed_prop, mixed_wohypo_prop]]) + '\n')
 
 					for sgcf_id in range(1, singleton_counts[pid] + 1):
 						sgcf_name = 'SGCF_' + str(sgcf_id)
