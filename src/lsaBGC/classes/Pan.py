@@ -8,6 +8,7 @@ from collections import defaultdict
 from Bio import SeqIO
 from lsaBGC.classes.BGC import BGC
 from lsaBGC import util
+from lsaBGC import paramplots
 import statistics
 import random
 import math
@@ -734,7 +735,7 @@ class Pan:
 		********************************************************************************************************************
 		Parameters:
 		- self: A Pan, GCF or BGC object.
-		- workspace: The output/workspace where to generate R scripts and other intermediate files.
+		- workspace: The output/workspace with intermediate files (retained for backwards compatibility).
 		- plot_input_1_file: The input table  
 		- plot_annot_file: The input table used to create the heatmap visuals on the second page of the PDF report.
 		- plot_input_2_file: The input table used to assess homogeneity in product/BGC-types per GCF clustering.
@@ -743,118 +744,13 @@ class Pan:
 		- plot_pdf_file: The resulting path to the report PDF file.
 		********************************************************************************************************************
 		"""
-		rscript_file = workspace + 'params_impact_rscript.R' 
-		with open(rscript_file, 'w') as rfh:
-
-			rfh.write('library(ggplot2)\n')
-			rfh.write('library(RColorBrewer)\n')
-			rfh.write('library(cowplot)\n\n')
-		
-			rfh.write('# read in plotting inputs\n')
-			rfh.write('data <- read.table("' + plot_input_1_file + '", header=T, sep="\t")\n')
-			rfh.write('annot_classes <- scan("' + plot_annot_file + '", what="", sep="\n")\n')
-			rfh.write('largest_gcfs_data <- read.table("' + plot_input_2_file + '", header=T, sep="\t")\n')
-			rfh.write('overview_data <- read.table("' + plot_overview_file + '", header=T, sep="\t")\n')
-			rfh.write('cc_gcfs_data <- read.table("' + plot_input_3_file + '", header=T, sep="\t")\n')
-			rfh.write('pdf_file <- "' + plot_pdf_file + '"\n\n')
-
-			rfh.write('# define color scheme for plots\n')
-			rfh.write('nb.cols <- length(annot_classes)-1\n')
-			rfh.write('annot_colors <- colorRampPalette(brewer.pal(nb.cols, "Set2"))(nb.cols)\n')
-			rfh.write('annot_colors <- c("#808080", annot_colors)\n')
-			rfh.write('names(annot_colors) <- annot_classes\n')
-			rfh.write('core_colors <- c("#737574", "#222422", "#ed665f")\n')
-			rfh.write('names(core_colors) <- c("Not Applicable", "Core Exists", "Core DNE")\n')
-
-			rfh.write('# open pdf for the report\n')
-			rfh.write('pdf(pdf_file, height=8, width=11)\n')
-
-			rfh.write('\n')
-			rfh.write('# Title page + overview scattermap\n')
-			rfh.write('repname <- ggplot()+theme_void() + ggtitle("Parameter Impact on\nGCF Delineations") + theme(plot.title = element_text(hjust = 0.5, size=70, face="bold"))\n')
-			rfh.write('scatter_plot <- ggplot(overview_data, aes(x=NumberClusters, y=SingletonToClustered)) +\n')
-			rfh.write('  geom_jitter(aes(color=as.factor(Inflation), shape=as.factor(JaccardSim)), alpha=0.7, size=2) + theme_classic() +\n')
-			rfh.write('  ggtitle("Tradeoff between Cluster Granularity vs. Singletons Incurred") + xlab("Number of GCFs") +\n')
-			rfh.write('  ylab("Ratio of BGCs which are\nsingletons to those in GCFs") +\n')
-			rfh.write('  guides(shape=guide_legend(title="Jaccard Similarity Cutoff"), color=guide_legend(title="MCL Inflation"))+\n')
-			rfh.write('  theme(legend.position = "bottom")\n')
-			rfh.write('print(plot_grid(repname, scatter_plot, rel_heights=c(1,2), ncol=1))\n')
-			rfh.write('\n')
-			rfh.write('# Overview Heatmaps\n')
-			rfh.write('gheat1 <- ggplot(overview_data, aes(x=as.factor(Inflation), y=as.factor(JaccardSim), fill=SingletonToClustered)) +\n')
-			rfh.write('  geom_tile() + theme_classic() +  scale_fill_gradient(low = "lightblue", high = "darkblue") + xlab("MCL Inflation") +\n')
-			rfh.write('  ylab("Jaccard Similarity Cutoff") + ggtitle("Ratio of BGCs which are\nsingletons to those in GCFs")+ theme(legend.title = element_blank())\n')
-			rfh.write('gheat2 <- ggplot(overview_data, aes(x=as.factor(Inflation), y=as.factor(JaccardSim), fill=NumberClusters)) +\n')
-			rfh.write('  geom_tile() + theme_classic() +   scale_fill_gradient(low = "lightgreen", high = "darkgreen") + xlab("MCL Inflation") +\n')
-			rfh.write('  ylab("Jaccard Similarity Cutoff") + ggtitle("Number of GCFs")+ theme(legend.title = element_blank())\n')
-			rfh.write('gheat3 <- ggplot(overview_data, aes(x=as.factor(Inflation), y=as.factor(JaccardSim), fill=MixedAnnotationProportion)) +\n')
-			rfh.write('  geom_tile() + theme_classic() +   scale_fill_gradient(low = "yellow", high = "gold") + xlab("MCL Inflation") +\n')
-			rfh.write('  ylab("Jaccard Similarity Cutoff") + ggtitle("Proportion of GCFs which feature\nmultiple BGC annotation categories\n(including unannotated)")+ theme(legend.title = element_blank())\n')
-			rfh.write('gheat4 <- ggplot(overview_data, aes(x=as.factor(Inflation), y=as.factor(JaccardSim), fill=MixedAnnotationWoHypotheticalProportion)) +\n')
-			rfh.write('  geom_tile() + theme_classic() +   scale_fill_gradient(low = "pink", high = "darkred") + xlab("MCL Inflation") +\n')
-			rfh.write('  ylab("Jaccard Similarity Cutoff") + ggtitle("Proportion of GCFs which feature\nmultiple BGC annotation categories\n(not including unannotated)")+ theme(legend.title = element_blank())\n')
-			rfh.write('\n')
-			rfh.write('gheatmaps_top <- plot_grid(gheat1, gheat2)\n')
-			rfh.write('gheatmaps_bottom <- plot_grid(gheat3, gheat4)\n')
-			rfh.write('print(plot_grid(gheatmaps_top, gheatmaps_bottom, rel_heights=c(1,1), ncol=1))\n')
-			rfh.write('\n')
-			rfh.write('# Boxplot views\n')
-			rfh.write('boxpl1 <- ggplot(data, aes(x=as.factor(Inflation), y=CoreSize, fill=as.factor(Inflation))) + geom_boxplot(show.legend=F) + facet_wrap(~JaccardSim, ncol=length(data$JaccardSim)) + theme_classic() + xlab("MCL Inflation") + ylab("") + ggtitle("Number of Core Homolog Groups per GCF") + scale_fill_brewer(palette="Set2")# + scale_y_log10()\n')
-			rfh.write('boxpl2 <- ggplot(data, aes(x=as.factor(Inflation), y=Samples, fill=as.factor(Inflation))) + geom_boxplot(show.legend=F) + facet_wrap(~JaccardSim, ncol=length(data$JaccardSim)) + theme_classic() + xlab("MCL Inflation") + ylab("") + ggtitle("Number of Samples with GCF") + scale_fill_brewer(palette="Set2") #+ scale_y_log10()\n')
-			rfh.write('boxpl3 <- ggplot(data, aes(x=as.factor(Inflation), y=AvgGeneCount, fill=as.factor(Inflation))) + geom_boxplot(show.legend=F) + facet_wrap(~JaccardSim, ncol=length(data$JaccardSim)) + theme_classic() + xlab("MCL Inflation") + ylab("") + ggtitle("Avg. Gene Count per BGC in GCF") + scale_fill_brewer(palette="Set2") #+ scale_y_log10()\n')
-			rfh.write('boxpl4 <- ggplot(data, aes(x=as.factor(Inflation), y=StdDevGeneCount, fill=as.factor(Inflation))) + geom_boxplot(show.legend=F) + facet_wrap(~JaccardSim, ncol=length(data$JaccardSim)) + theme_classic() + xlab("MCL Inflation") + ylab("") + ggtitle("Std. Deviation of Gene Count for BGCs in GCF") + scale_fill_brewer(palette="Set2") #+ scale_y_log10()\n')
-			rfh.write('\n')
-			rfh.write('top_row <- plot_grid(boxpl1, boxpl2)\n')
-			rfh.write('bot_row <- plot_grid(boxpl3, boxpl4)\n')
-			rfh.write('\n')
-			rfh.write('print(plot_grid(boxpl1, boxpl2, boxpl3, boxpl4, rel_heights=c(1,1,1,1), ncol=1))\n')
-			rfh.write('\n')
-			rfh.write('# determine number of parameter combinations tested and axes boundaries for scatter plots\n')
-			rfh.write('params <- unique(data$Parameters)\n')
-			rfh.write('npages <- length(params)\n')
-			rfh.write('\n')
-			rfh.write('for(i in 1:npages) {\n')
-			rfh.write('  curr_param = params[i]\n')
-			rfh.write('\n')
-			rfh.write('  data_filt <- data[data$Parameters == curr_param,]\n')
-			rfh.write('  data_filt_scatter <- data_filt[!is.na(data_filt$Samples_Offset),]\n')
-			rfh.write('  largest_gcfs_data_filt <- largest_gcfs_data[largest_gcfs_data$Parameters == curr_param,]\n')
-			rfh.write('  cc_gcfs_data_filt <- cc_gcfs_data[cc_gcfs_data$Parameters == curr_param,]\n')
-			rfh.write('\n')
-			rfh.write('  paramname <- ggplot()+theme_void() + ggtitle(curr_param) + theme(plot.title = element_text(hjust = 0.5, size=32, face="bold"))\n')
-			rfh.write('\n')
-			rfh.write('  ghist_1 <- ggplot(data_filt, aes(x=Samples, fill=CoreExists)) + geom_histogram(color="black", size=0.3) + theme_classic() +\n')
-			rfh.write('    theme(legend.position = c(0.8, 0.8)) + scale_fill_manual(values=core_colors) + xlab("Sample Count") + guides(fill=guide_legend(title=""))\n')
-			rfh.write('\n')
-			rfh.write('  ghist_2 <- ggplot(data_filt, aes(x=StdDevGeneCount)) + xlab("Std. Deviation in Gene Count") + geom_histogram(color="black", fill="black") + theme_classic() + scale_y_log10()\n')
-			rfh.write('\n')
-			rfh.write('  gbar_1 <- ggplot(cc_gcfs_data_filt, aes(x=reorder(GCF, Total.BGCs), y=Sample_Count, fill=Category)) +\n')
-			rfh.write('    geom_bar(stat="identity", color="black", show.legend=F) + theme_classic() + scale_fill_manual(values=c("black", "grey")) +\n')
-			rfh.write('    theme(axis.text.x=element_blank(), axis.ticks.x=element_blank()) + xlab("All GCFs (grey=single-copy, black=multi-copy)") + ylab("Sample Count")\n')
-			rfh.write('\n')
-			rfh.write('  gbar_2 <- ggplot(largest_gcfs_data_filt, aes(x=reorder(GCF, Total.BGCs), y=Count, fill=Annotation)) +\n')
-			rfh.write('    geom_bar(stat="identity", color="black", show.legend=F) + theme_classic() + scale_fill_manual(values=annot_colors) +\n')
-			rfh.write('    theme(axis.text.x=element_blank(), axis.ticks.x=element_blank()) + xlab("Top 50 GCFs with Most BGCs (color = BGC product type)") + ylab("BGC Count")\n')
-			rfh.write('\n')
-			rfh.write('  mid_row <- plot_grid(ghist_1, ghist_2)\n')
-			rfh.write('  print(plot_grid(paramname, mid_row, gbar_1, gbar_2, rel_heights=c(1,2,2,2), ncol=1))\n')
-			rfh.write('}\n')
-			rfh.write('\n')
-
-			rfh.write('dev.off()\n')
-
-
-		rscript_plot_cmd = ["Rscript", rscript_file]
-		if self.logObject:
-			self.logObject.info('Running R-based plotting with the following command: %s' % ' '.join(rscript_plot_cmd))
 		try:
-			subprocess.call(' '.join(rscript_plot_cmd), shell=True, stdout=sys.stderr,
-							stderr=sys.stderr,
-							executable='/bin/bash')
+			paramplots.create_param_influence_report(plot_input_1_file, plot_annot_file, plot_input_2_file,
+													 plot_overview_file, plot_input_3_file, plot_pdf_file)
 			if self.logObject:
-				self.logObject.info('Successfully ran: %s' % ' '.join(rscript_plot_cmd))
+				self.logObject.info('Created parameter impact report: %s' % plot_pdf_file)
 		except Exception as e:
 			if self.logObject:
-				self.logObject.error('Had an issue running: %s' % ' '.join(rscript_plot_cmd))
+				self.logObject.error('Had an issue creating the parameter impact report: %s' % plot_pdf_file)
 				self.logObject.error(traceback.format_exc())
-			raise RuntimeError('Had an issue running: %s' % ' '.join(rscript_plot_cmd)) from e
+			raise RuntimeError('Had an issue creating the parameter impact report: %s' % plot_pdf_file) from e

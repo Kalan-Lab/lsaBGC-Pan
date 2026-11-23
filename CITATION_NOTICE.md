@@ -20,10 +20,9 @@ lsaBGC-Pan is made possible by many other tools including:
     - pyrodigal: https://joss.theoj.org/papers/10.21105/joss.04296
 
 - Visualization software:
-    - ggplot2: https://ggplot2-book.org/
-    - ggtree: https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.12628
-    - gggeenes: https://github.com/wilkox/gggenes
-    - cowplot: https://wilkelab.org/cowplot/articles/plot_grid.html
+    - matplotlib: https://ieeexplore.ieee.org/document/4160265
+    - plotly: https://plot.ly
+    - ColorBrewer (color palettes): https://colorbrewer2.org
     - iTol: https://pubmed.ncbi.nlm.nih.gov/30931475/
 
 - GCF clustering and population-genetics analysis:

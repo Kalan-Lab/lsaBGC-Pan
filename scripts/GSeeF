@@ -195,7 +195,7 @@ def GSeeF():
 	for gcf_tup in sorted(gcfs_order_index.items(), key=itemgetter(1), reverse=True):
 		gcf_order.append(gcf_tup[0])
 
-	# Step 3: Create track files for Rscript and iTol
+	# Step 3: Create track files for plotting and iTol
 	logObject.info('\n---------------------\nStep 3\n---------------------\nCreating track/input files for plotting.')
 	sys.stdout.write('---------------------\nStep 3\n---------------------\nCreating track/input files for plotting.\n')
 
@@ -236,7 +236,7 @@ def GSeeF():
 				printlist.append('|'.join(col_array))
 			itol_track_handle.write('\t'.join(printlist) + '\n')
 
-	# Step 4: Create and run GSeeF.R Rscript
+	# Step 4: Create static (PDF) and interactive (HTML) visualizations
 	logObject.info('\n---------------------\nStep 4\n---------------------\nGenerating final static PDF visualization and iTol track file.')
 	sys.stdout.write('---------------------\nStep 4\n---------------------\nGenerating final static PDF visualization and iTol track file.\n')
 
@@ -254,47 +254,9 @@ def GSeeF():
 
 def runPlotting(workspace, phylo_file, heatmap_file, pdf_file, legend_pdf_file, logObject):
 	try:
-		gseef_script = workspace + 'gseef_rscript.R'
-		with open(gseef_script, 'w') as gs_handle:
-			gs_handle.write('library(ggplot2)\n')
-			gs_handle.write('library(ggtree)\n')
-			gs_handle.write('library(gggenes)\n')
-			gs_handle.write('library(ape)\n')
-			gs_handle.write('library(phytools)\n')
-			gs_handle.write('library(aplot)\n')
-			gs_handle.write('library(dplyr)\n')
-			gs_handle.write('library(grid)\n')
-			gs_handle.write('library(gridExtra)\n\n')
-
-			gs_handle.write('phylo.tree <- read.tree("' + phylo_file + '")\n')
-			gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
-
-			gs_handle.write('heatmap.data <- read.table("' + heatmap_file + '", header=T, sep="\\t")\n')
-			gs_handle.write('heatmap.data.filt <- heatmap.data[heatmap.data$annotation != "absent",]\n')
-			gs_handle.write('heatmap.data.select <- distinct(heatmap.data.filt[c("annotation", "colors")])\n')
-			gs_handle.write('gcf_colors <- c(heatmap.data.select$colors)\n')
-			gs_handle.write('names(gcf_colors) <- c(heatmap.data.select$annotation)\n\n')
-
-			gs_handle.write('pdf("' + pdf_file + '", height=10, width=20)\n')
-			gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')
-			gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = reorder(gcf, gcf_index), y = label, fill = annotation)) +\n') 
-			gs_handle.write('theme_classic() + scale_fill_manual(values=gcf_colors, na.value="white") +\n')
-			gs_handle.write('xlab("GCF IDs") + ylab("") + geom_tile(color="white", show.legend=F) +\n')
-			gs_handle.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
-			gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
-			gs_handle.write('dev.off()\n\n')
-
-			gs_handle.write('pdf("' + legend_pdf_file + '", height=10, width=5)\n')
-			gs_handle.write('my_hist <- ggplot(heatmap.data, aes(x=annotation, y=1, fill = annotation)) + geom_bar(stat="identity") + scale_fill_manual(values=gcf_colors)\n')
-			gs_handle.write('legend <- cowplot::get_legend(my_hist)\n')
-			gs_handle.write('grid.newpage()\n')
-			gs_handle.write('grid.draw(legend)\n')
-			gs_handle.write('dev.off()\n\n')
-
-		rscript_cmd = ['Rscript', gseef_script]
-		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[pdf_file, legend_pdf_file])
+		phyloplot.gseef_pdf(phylo_file, heatmap_file, pdf_file, legend_pdf=legend_pdf_file)
 	except Exception as e:
-		msg = 'Issues running image creation (which is primarily based on the R library ggtree)'
+		msg = 'Issues running creation of the static (PDF) visualizations.'
 		sys.stderr.write(msg + '\n')
 		sys.stderr.write(traceback.format_exc() + '\n')
 		logObject.error(msg)

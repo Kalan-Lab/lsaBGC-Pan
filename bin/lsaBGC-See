@@ -153,15 +153,15 @@ def lsaBGC_See():
 	GCF_Object.assignColorsToHGs(GCF_Object.gene_to_hg, GCF_Object.bgc_genes, outdir)
 	logObject.info("Successfully parsed homolog matrix.")
 
-	# Step 4: Create iTol and gggenes (R) tracks for visualizing BGCs of GCF across a phylogeny.
+	# Step 4: Create iTol and gene-arrow tracks for visualizing BGCs of GCF across a phylogeny.
 	if species_phylogeny:
 		logObject.info("Create iTol tracks for viewing BGCs of GCF across phylogeny. Note, should be used to annotate edited species phylogeny or BGC SCC phylogeny as some samples could have multiple BGCs!")
 		GCF_Object.createItolBGCSeeTrack(outdir + 'BGCs_Visualization.iTol.txt')
-		GCF_Object.visualizeGCFViaR(outdir + 'BGCs_Visualization.gggenes.txt',
-									outdir + 'BGCs_Visualization.heatmap.txt',
-									outdir + 'species_phylogeny.edited.nwk',
-									outdir + 'BGC_Visualization.species_phylogeny.pdf', outdir + 'plot_with_species_phylo.R') 
-		logObject.info("iTol track written and automatic plot via gggenes/ggtree (R) rendered!")
+		GCF_Object.visualizeGCF(outdir + 'BGCs_Visualization.gggenes.txt',
+								outdir + 'BGCs_Visualization.heatmap.txt',
+								outdir + 'species_phylogeny.edited.nwk',
+								outdir + 'BGC_Visualization.species_phylogeny.pdf')
+		logObject.info("iTol track written and static (PDF) and interactive (HTML) plots rendered!")
 
 	# Step 5: (Optional) Create phylogeny from single-copy-core homologs from BGCs across samples (single copy in samples, not BGCs)
 	if create_gcf_phylogeny:
@@ -177,10 +177,10 @@ def lsaBGC_See():
 		GCF_Object.modifyPhylogenyForSamplesWithMultipleBGCs(outdir + 'BGC_SCCs_Concatenated.nwk', outdir + 'BGC_SCCs_Concatenated.edited.nwk', prune_set=None)
 		if not os.path.isfile(outdir + "BGCs_Visualization.iTol.txt"):
 			GCF_Object.createItolBGCSeeTrack(outdir + 'BGCs_Visualization.iTol.txt')
-		GCF_Object.visualizeGCFViaR(outdir + 'BGCs_Visualization.gggenes.txt',
-									outdir + 'BGCs_Visualization.heatmap.txt',
-									outdir + 'BGC_SCCs_Concatenated.edited.nwk',
-									outdir + 'BGC_Visualization.GCF_phylogeny.pdf', outdir + 'plot_with_gcf_phylo.R')
+		GCF_Object.visualizeGCF(outdir + 'BGCs_Visualization.gggenes.txt',
+								outdir + 'BGCs_Visualization.heatmap.txt',
+								outdir + 'BGC_SCCs_Concatenated.edited.nwk',
+								outdir + 'BGC_Visualization.GCF_phylogeny.pdf')
 
 	# Write checkpoint file for lsaBGC-AutoAnalyze.py
 	checkpoint_file = outdir + 'CHECKPOINT.txt'

@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 import json
 from Bio import SeqIO
 import logging
@@ -456,7 +457,7 @@ def runCmdViaSubprocess(cmd, logObject=None, check_files=[], check_directories=[
 		return_code = subprocess.call(' '.join(cmd), shell=True, stdout=stdout, stderr=stderr,
 						executable='/bin/bash')
 		if return_code != 0:
-			# if expected outputs are specified, rely on them to determine success (some tools, e.g. R scripts, can
+			# if expected outputs are specified, rely on them to determine success (some tools can
 			# exit non-zero after producing their results), otherwise treat the non-zero exit as a failure.
 			if len(check_files) == 0 and len(check_directories) == 0:
 				raise RuntimeError('Command exited with non-zero return code %d' % return_code)
@@ -558,32 +559,98 @@ def pairwiseDistancesFromTree(tree_file, logObject):
 		sys.stderr.write(traceback.format_exc() + '\n')
 		sys.exit(1)
 
+# ColorBrewer palettes (https://colorbrewer2.org) used for coloring in lsaBGC-Pan (largest version of each).
+BREWER_PALETTES = {
+	'Spectral': ['#9E0142', '#D53E4F', '#F46D43', '#FDAE61', '#FEE08B', '#FFFFBF', '#E6F598', '#ABDDA4', '#66C2A5',
+				 '#3288BD', '#5E4FA2'],
+	'Set1': ['#E41A1C', '#377EB8', '#4DAF4A', '#984EA3', '#FF7F00', '#FFFF33', '#A65628', '#F781BF', '#999999'],
+	'Set2': ['#66C2A5', '#FC8D62', '#8DA0CB', '#E78AC3', '#A6D854', '#FFD92F', '#E5C494', '#B3B3B3'],
+	'Pastel1': ['#FBB4AE', '#B3CDE3', '#CCEBC5', '#DECBE4', '#FED9A6', '#FFFFCC', '#E5D8BD', '#FDDAEC', '#F2F2F2']}
+# qualitative palettes share colors across their n-color versions, the diverging Spectral palette only has a fixed
+# version here (the 11-color one), which is what was always requested in lsaBGC-Pan.
+QUALITATIVE_PALETTES = set(['Set1', 'Set2', 'Pastel1'])
+
+
+def brewerColorRamp(palette, color_count, palette_color_count=None):
+	"""
+	Description:
+	Function to get colors interpolated along a ColorBrewer palette - equivalent to the R code:
+	colorRampPalette(brewer.pal(palette_color_count, palette))(color_count)
+	********************************************************************************************************************
+	Parameters:
+	- palette: The ColorBrewer palette name (Spectral, Set1, Set2 or Pastel1).
+	- color_count: The count of desired colors.
+	- palette_color_count [Optional]: The number of palette colors to interpolate between [Default is color_count].
+	********************************************************************************************************************
+	Returns:
+	- A list of hex color codes.
+	********************************************************************************************************************
+	"""
+	color_count = int(color_count)
+	if color_count <= 0:
+		return []
+	base = BREWER_PALETTES[palette]
+	if palette_color_count is None:
+		palette_color_count = color_count
+	if palette in QUALITATIVE_PALETTES:
+		# brewer.pal returns at least 3 and at most the maximum number of colors for a palette
+		base = base[:max(3, min(int(palette_color_count), len(base)))]
+	# mirror R's arithmetic exactly: colorRamp() linearly interpolates channels on a 0-1 scale at positions
+	# seq(0, 1, length.out=n) using approx(), the result is multiplied by 255 and rgb(..., maxColorValue=255) truncates.
+	knots_y = [[int(c[i:i + 2], 16) / 255.0 for c in base] for i in (1, 3, 5)]
+	m = len(base)
+	knots_x = [i * (1.0 / (m - 1)) for i in range(m)] if m > 1 else [0.0]
+
+	def _approx(v, y):
+		if m == 1:
+			return y[0]
+		i, j = 0, m - 1
+		if v <= knots_x[0]:
+			return y[0]
+		if v >= knots_x[-1]:
+			return y[-1]
+		while i < j - 1:
+			ij = (i + j) // 2
+			if v < knots_x[ij]:
+				j = ij
+			else:
+				i = ij
+		if v == knots_x[j]:
+			return y[j]
+		if v == knots_x[i]:
+			return y[i]
+		return y[i] + (y[j] - y[i]) * ((v - knots_x[i]) / (knots_x[j] - knots_x[i]))
+
+	if color_count == 1:
+		positions = [0.0]
+	else:
+		by = 1.0 / (color_count - 1)
+		positions = [k * by for k in range(color_count)]
+	colors = []
+	for v in positions:
+		channels = [min(max(_approx(v, knots_y[ch]), 0.0), 1.0) * 255 for ch in range(3)]
+		colors.append('#%02X%02X%02X' % tuple(int(x) for x in channels))
+	return colors
+
+
 def generateColors(workspace, outfile, color_count, palette='Spectral', palette_color_count=12):
 	"""
 	Description:
 	Void function to generate an output file with colors in hex code for various plotting purposes.
 	********************************************************************************************************************
 	Parameters:
-	- workspace: The workspace where to write temporary files and scripts.
+	- workspace: The workspace where to write temporary files (retained for backwards compatibility; unused).
 	- outfile: The output file where hex codes of colors will be written to.
 	- color_count: The count of desired colors.
-	- palette [Optional]: The color palette in R to use.
+	- palette [Optional]: The ColorBrewer color palette to use.
 	- palette_color_count [Optional]: The color palette's default color count.
 	********************************************************************************************************************
 	"""
 	try:
-		assert(os.path.isdir(workspace))
-		workspace = os.path.abspath(workspace) + '/'
-	
-		color_brew_script = workspace + 'brewColors.R'
-		with open(color_brew_script, 'w') as cbs_handle:
-			cbs_handle.write('library(RColorBrewer)\n')
-			cbs_handle.write('mycolors <- colorRampPalette(brewer.pal(' + str(palette_color_count) + ', "' + palette + '"))(' + str(color_count) + ')\n')
-			cbs_handle.write('write(mycolors, file="' + outfile + '")\n')
-
-		rscript_cmd = ['Rscript', color_brew_script]
-		runCmdViaSubprocess(rscript_cmd, check_files=[outfile])
-
+		colors = brewerColorRamp(palette, color_count, palette_color_count=palette_color_count)
+		with open(outfile, 'w') as of:
+			if colors:
+				of.write('\n'.join(colors) + '\n')
 	except Exception as e:
 		msg = 'Issues generating colors!'
 		sys.stderr.write(msg + '\n')

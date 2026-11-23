@@ -154,10 +154,11 @@ def create_parser():
           - Consider using tools for dereplication/strain-clustering (such as skDER/CiDDER, dRep, PopPunk, 
             or treemmer) to prune down your set of genomes if you have more than 200.
           - Alternatively, the upper limit can be lifted with --ignore-upperbound-limit (-x).
+    * Before the first run, set up the annotation databases used by zol and bofasa with: lsaBGC-Pan setup
+      (see "lsaBGC-Pan setup -h" for options, e.g. --minimal to only download what lsaBGC-Pan needs).
     * By default, bofasa (https://github.com/raufs/bofasa) is used for orthology inference. It is designed for 
-      orthology inference across multiple bacterial species and prioritizes accuracy over speed. It requires the 
-      bofasa databases to be set up beforehand (run "bofasa setup" and make sure the BOFASA_DB_PATH environment 
-      variable is set).
+      orthology inference across multiple bacterial species and prioritizes accuracy over speed. It requires its 
+      databases (Pfam and ISfinder) to be set up beforehand via "lsaBGC-Pan setup".
     * Panaroo (--use-panaroo) can be used instead, but should only be used if working with genomes belonging to 
       a single bacterial species. OrthoFinder can also be requested explicitly (--use-orthofinder).
     * Specifying fungal mode makes sure OrthoFinder is being used and that antiSMASH results were provided. 
@@ -260,6 +261,11 @@ def create_parser():
 	return args
 
 def lsaBGC():
+	# "lsaBGC-Pan setup" sets up the annotation databases for zol and bofasa
+	if len(sys.argv) > 1 and sys.argv[1] == 'setup':
+		from lsaBGC import setup_databases
+		sys.exit(setup_databases.main(sys.argv[2:]))
+
 	version_string = util.parseVersion()
 	if '-v' in sys.argv or '--version' in sys.argv:
 		logo = """
@@ -516,18 +522,23 @@ Then, please try re-running lsaBGC-Pan again!
 
 > Please try running the following in your lsaBGC-Pan conda environment:
 $ conda install -c conda-forge -c bioconda bofasa
-$ bofasa setup --skip-genomad
+$ lsaBGC-Pan setup
 
 Then, please try re-running lsaBGC-Pan again!
 """)
 			sys.exit(1)
 		bofasa_db_dir = os.getenv('BOFASA_DB_PATH', '').strip()
-		if not bofasa_db_dir or not os.path.isfile(os.path.join(bofasa_db_dir, 'database_location_paths.txt')):
+		from lsaBGC import setup_databases
+		bofasa_dbs_ok = False
+		if bofasa_db_dir:
+			bofasa_dbs_ok, _ = setup_databases.check_bofasa_databases(bofasa_db_dir)
+		if not bofasa_dbs_ok:
 			sys.stderr.write("""
 [ERROR] bofasa (the default for orthology inference) is being used but its databases do not appear to be set up! 
 
-> Please make sure the BOFASA_DB_PATH environment variable is set and that databases were downloaded:
-$ bofasa setup --skip-genomad
+> Please make sure the BOFASA_DB_PATH environment variable is set (it is set automatically when the lsaBGC-Pan
+  conda environment is activated) and set up the databases with:
+$ lsaBGC-Pan setup
 
 > Alternatively, use Panaroo (--use-panaroo; single species only) or OrthoFinder (--use-orthofinder) instead.
 

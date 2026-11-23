@@ -152,14 +152,14 @@ def lsaBGC_ComprehenSeeIve():
 	GCF_Object.inputHomologyInformation(gene_to_hg, hg_genes, hg_median_copy_count, hg_prop_multi_copy)
 	logObject.info("Successfully parsed homolog matrix.")
 
-	# Step 3: Create iTol and gggenes (R) tracks for visualizing BGCs of GCF across a phylogeny.
+	# Step 3: Create tracks for visualizing ortholog groups of the GCF across a phylogeny.
 	if species_phylogeny:
 		logObject.info("Create iTol tracks for viewing BGCs of GCF across phylogeny. Note, should be used to annotate edited species phylogeny or BGC SCC phylogeny as some samples could have multiple BGCs!")
-		GCF_Object.visualizeComprehenSeeIveGCFViaR(orthofinder_matrix_file, species_phylogeny,
-												   outdir + 'BGCs_Visualization.heatmap.txt',
-												   outdir + 'BGCs_Visualization.detection_method.txt',
-												   outdir + 'BGC_Visualization.species_phylogeny.pdf', outdir + 'plot_with_species_phylo.R')
-		logObject.info("iTol track written and automatic plot via ggtree (R) rendered!")
+		GCF_Object.visualizeComprehenSeeIveGCF(orthofinder_matrix_file, species_phylogeny,
+											   outdir + 'BGCs_Visualization.heatmap.txt',
+											   outdir + 'BGCs_Visualization.detection_method.txt',
+											   outdir + 'BGC_Visualization.species_phylogeny.pdf')
+		logObject.info("Static (PDF) and interactive (HTML) plots rendered!")
 
 	# Step 4: (Optional) Create phylogeny from single-copy-core homologs from BGCs across samples (single copy in samples, not BGCs)
 	if create_gcf_phylogeny:
@@ -172,10 +172,10 @@ def lsaBGC_ComprehenSeeIve():
 		# sites with high rates of missing data.
 		logObject.info("Creating phylogeny using FastTree2 after creating concatenated BGC alignment and processing to remove sites with high rates of missing data!")
 		GCF_Object.constructGCFPhylogeny(outdir + 'BGC_SCCs_Concatenated.fasta', outdir + 'BGC_SCCs_Concatenated.nwk', only_scc=only_scc)
-		GCF_Object.visualizeComprehenSeeIveGCFViaR(orthofinder_matrix_file, outdir + 'BGC_SCCs_Concatenated.nwk',
-												   outdir + 'BGCs_Visualization.heatmap.txt',
-												   outdir + 'BGCs_Visualization.detection_method.txt',
-												   outdir + 'BGC_Visualization.GCF_phylogeny.pdf', outdir + 'plot_with_gcf_phylo.R')
+		GCF_Object.visualizeComprehenSeeIveGCF(orthofinder_matrix_file, outdir + 'BGC_SCCs_Concatenated.nwk',
+											   outdir + 'BGCs_Visualization.heatmap.txt',
+											   outdir + 'BGCs_Visualization.detection_method.txt',
+											   outdir + 'BGC_Visualization.GCF_phylogeny.pdf')
 
 	# Write checkpoint file for lsaBGC-AutoAnalyze.py
 	checkpoint_file = outdir + 'CHECKPOINT.txt'

@@ -197,9 +197,8 @@ def lsaBGC_Reconcile():
 	bgc_og_prottree_dir = scratchdir + 'BGC_OG_Protein_Trees/'
 	bgc_og_tracks_dir = scratchdir + 'BGC_OG_Tracks_for_Visualization/'
 	bgc_og_visuals_dir = outdir + 'BGC_OG_Phylogenetic_Visualizations/'
-	bgc_og_visuals_script_dir = outdir + 'BGC_OG_PhyloViz_Scripts/'
 
-	util.setupReadyDirectory([bgc_og_protseq_dir, bgc_og_protalgn_dir, bgc_og_prottrim_dir, bgc_og_prottree_dir, bgc_og_tracks_dir, bgc_og_visuals_dir, bgc_og_visuals_script_dir])
+	util.setupReadyDirectory([bgc_og_protseq_dir, bgc_og_protalgn_dir, bgc_og_prottrim_dir, bgc_og_prottree_dir, bgc_og_tracks_dir, bgc_og_visuals_dir])
 
 	found_in_nonbgc_context = defaultdict(lambda: False)
 	og_visited = set([])
@@ -245,7 +244,7 @@ def lsaBGC_Reconcile():
 	population_color_mapping_file = scratchdir + 'pop_colors_mapping.txt'
 	util.mapColorsToCategories(all_pops, population_color_file, population_color_mapping_file)
 	population_color_legend_pdf = outdir + 'population_coloring.pdf'
-	plotLegend(population_color_mapping_file, population_color_legend_pdf, scratchdir, logObject)
+	plotLegend(population_color_mapping_file, population_color_legend_pdf, 'Population', logObject)
 
 	gcf_count = len(all_gcfs)
 	gcf_color_file = scratchdir + 'gcf_colors.txt'
@@ -255,7 +254,7 @@ def lsaBGC_Reconcile():
 	with open(gcf_color_mapping_file, 'a+') as gcmf_handle:
 		gcmf_handle.write('Not in BGC\t"#808080"\n')
 	gcf_color_legend_pdf = outdir + 'gcf_coloring.pdf'
-	plotLegend(gcf_color_mapping_file, gcf_color_legend_pdf, scratchdir, logObject)
+	plotLegend(gcf_color_mapping_file, gcf_color_legend_pdf, 'GCF', logObject)
 
 	combined_color_map_file = scratchdir + 'gcf_and_pop_colors_mapping.txt'
 	with open(combined_color_map_file, 'w') as ccmf_handle:
@@ -313,12 +312,11 @@ def lsaBGC_Reconcile():
 			og_prot_trim = bgc_og_prottrim_dir + bo + '.msa.trimmed.faa'
 			og_prot_tre = bgc_og_prottree_dir + bo + '.tre'
 			og_track_file = bgc_og_tracks_dir + bo + '.txt'
-			og_rscript_file = bgc_og_visuals_script_dir + bo + '.R'
 			og_pdf_file = bgc_og_visuals_dir + bo + '.pdf'
 
 			if os.path.isfile(og_prot_trim) and os.path.getsize(og_prot_trim) > 50:
 				fasttree_cmd = ['FastTree', og_prot_trim, '>', og_prot_tre]
-				plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject]
+				plot_input = [og_prot_tre, og_track_file, combined_color_map_file, og_pdf_file, logObject]
 				fasttree_cmds.append(fasttree_cmd)
 				plot_inputs.append(plot_input)
 			else:
@@ -426,79 +424,32 @@ def lsaBGC_Reconcile():
 	util.closeLoggerObject(logObject)
 	sys.exit(0)
 
-def plotLegend(color_file, color_legend_pdf, scratchdir, logObject):
+def plotLegend(color_file, color_legend_pdf, title, logObject):
 	try:
-		legend_script = scratchdir + 'legend_rscript.R'
-		with open(legend_script, 'w') as gs_handle:
-			gs_handle.write('library(ggplot2)\n')
-			gs_handle.write('library(grid)\n')
-			gs_handle.write('library(gridExtra)\n\n')
-
-			gs_handle.write('dat <- read.table("' + color_file + '", sep="\\t", header=T)\n')
-			gs_handle.write('colors <- c(dat$color)\n')
-			gs_handle.write('names(colors) <- c(dat$category)\n\n')
-
-			gs_handle.write('pdf("' + color_legend_pdf + '", height=10, width=5)\n')
-			gs_handle.write('fake_bar <- ggplot(dat, aes(x=category, y=1, fill = category)) + geom_bar(stat="identity") + scale_fill_manual(values=colors)\n')
-			gs_handle.write('legend <- cowplot::get_legend(fake_bar)\n')
-			gs_handle.write('grid.newpage()\n')
-			gs_handle.write('grid.draw(legend)\n')
-			gs_handle.write('dev.off()\n\n')
-
-		rscript_cmd = ['Rscript', legend_script]
-		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[color_legend_pdf])
+		phyloplot.legend_pdf_from_color_map(color_file, color_legend_pdf, title=title)
 	except Exception as e:
 		msg = 'Issues creating legends for coloring of populations/GCFs.'
-		sys.stderr.write(msg + '\n')   
+		sys.stderr.write(msg + '\n')
 		sys.stderr.write(traceback.format_exc() + '\n')
 		logObject.error(msg)
 		sys.exit(1)
 
 def runPlotting(inputs):
-	og_prot_tre, og_track_file, combined_color_map_file, og_rscript_file, og_pdf_file, logObject = inputs
+	og_prot_tre, og_track_file, combined_color_map_file, og_pdf_file, logObject = inputs
 	og_html_file = os.path.splitext(og_pdf_file)[0] + '.html'
 	og_name = os.path.basename(og_prot_tre).split('.tre')[0]
+	title = 'lsaBGC-Reconcile: gene tree for ortholog group %s' % og_name
 	phyloplot.safely_create(phyloplot.reconcile_html, og_prot_tre, og_track_file, combined_color_map_file, og_html_file,
-							'lsaBGC-Reconcile: gene tree for ortholog group %s' % og_name, logObject=logObject)
+							title, logObject=logObject)
 	try:
-		with open(og_rscript_file, 'w') as gs_handle:
-			gs_handle.write('library(ggplot2)\n')  
-			gs_handle.write('library(ggtree)\n')
-			gs_handle.write('library(gggenes)\n')
-			gs_handle.write('library(ape)\n')
-			gs_handle.write('library(phytools)\n')
-			gs_handle.write('library(aplot)\n')
-			gs_handle.write('library(dplyr)\n')
-			gs_handle.write('library(grid)\n')
-			gs_handle.write('library(gridExtra)\n\n')
-
-			gs_handle.write('phylo.tree <- read.tree("' + og_prot_tre + '")\n')
-			gs_handle.write('phylo.tree <- midpoint.root(phylo.tree)\n')
-			gs_handle.write('tree.labels <- phylo.tree$tip.label\n\n')
-
-			gs_handle.write('heatmap.data <- read.table("' + og_track_file + '", header=T, sep="\\t")\n')
-			gs_handle.write('colors.data <- read.table("' + combined_color_map_file + '", header=T, sep="\\t")\n')
-
-			gs_handle.write('colors <- c(colors.data$color)\n')
-			gs_handle.write('names(colors) <- c(colors.data$category)\n\n')
-
-			gs_handle.write('pdf("' + og_pdf_file + '", height=10, width=20)\n')
-			gs_handle.write('gg_tr <- ggtree(phylo.tree)\n')   
-			gs_handle.write('gg_hm <- ggplot(heatmap.data, aes(x = type, y = label, fill = value)) +\n') 
-			gs_handle.write('theme_classic() + scale_fill_manual(values=colors, na.value="white") +\n')
-			gs_handle.write('xlab("") + ylab("") + geom_tile(color="white", show.legend=F) +\n')
-			gs_handle.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
-			gs_handle.write('gg_hm %>% insert_left(gg_tr, width=0.4)\n')
-			gs_handle.write('dev.off()\n\n')
-
-		rscript_cmd = ['Rscript', og_rscript_file]
-		util.runCmdViaSubprocess(rscript_cmd, logObject=logObject, check_files=[og_pdf_file])
+		phyloplot.reconcile_pdf(og_prot_tre, og_track_file, combined_color_map_file, og_pdf_file, title)
 		return True
 	except Exception as e:
 		msg = 'Issues running creation of orthogroup gene tree phylogeny for phylogeny: %s' % og_prot_tre
 		sys.stderr.write(msg + '\n')
 		logObject.error(msg)
 		sys.stderr.write(traceback.format_exc() + '\n')
+		logObject.error(traceback.format_exc())
 		return False
 
 if __name__ == '__main__':

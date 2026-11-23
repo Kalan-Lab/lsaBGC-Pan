@@ -19,13 +19,13 @@ RUN apt-get update && apt-get install -y git wget gcc && \
     apt-get clean -y && apt-get autoclean -y && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
-# Set env variables and download minimal databases (MIBiG v3.1 + PGAP HMMs)
+# Set env variables and download minimal databases (Pfam, PGAP HMMs, MIBiG, and ISfinder)
 ENV PATH /usr/src/lsaBGC_conda_env/bin:$PATH
 ENV ZOL_EXEC_PATH /usr/src/lsaBGC_conda_env/bin/
 ENV ZOL_DATA_PATH /usr/src/lsaBGC_conda_env/share/zol/db/
 ENV BOFASA_DB_PATH /usr/src/lsaBGC_conda_env/share/bofasa/db/
-RUN setup_annotation_dbs.py -ld -y && \
-    mkdir -p ${BOFASA_DB_PATH} && bofasa setup --skip-genomad --force -y && \
+# zol's minimal lsaBGC databases + ISfinder for bofasa (bofasa links to zol's Pfam instead of a second copy)
+RUN mkdir -p ${ZOL_DATA_PATH} ${BOFASA_DB_PATH} && lsaBGC-Pan setup --minimal -y && \
     chmod 777 /home
 USER 1000:1000
 RUN mkdir /home/input /home/output

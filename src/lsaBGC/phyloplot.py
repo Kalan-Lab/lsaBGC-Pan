@@ -1,16 +1,21 @@
 """
-phyloplot: lightweight interactive (Plotly) phylogenetic heatmaps for lsaBGC-Pan.
+phyloplot: phylogenetic heatmaps for lsaBGC-Pan, rendered both as interactive HTML (Plotly) and static PDF (matplotlib).
 
 Each figure shows a (midpoint-rooted) phylogeny on the left with aligned leaf labels, optionally colored tip markers,
 followed by one or more categorical heatmaps and an optional gene-architecture (arrow) panel, all sharing the same rows.
 Figure dimensions scale with the number of leaves and columns, so large trees are not squeezed onto a single page; in
 the browser, users can zoom/pan, hover for details, and download an SVG via the camera icon.
 
+The tool-specific functions (e.g. see_html / see_pdf) build one figure specification from the track files produced by
+the lsaBGC programs, which is then rendered by either backend, so the HTML and PDF versions always show the same data.
+
 plotly.js is loaded from a CDN, so an internet connection is needed when opening the resulting HTML files.
 """
 
 import os
 import sys
+import math
+import threading
 import traceback
 from collections import defaultdict
 from Bio import Phylo
@@ -21,6 +26,13 @@ DEFAULT_PALETTE = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc9
 
 HELP_TEXT = ("Drag to zoom, double-click to reset, hover for details; click legend entries to hide/show them; "
 			 "use the camera icon to download an SVG.")
+
+# matplotlib's text/font caches are not guaranteed to be thread-safe and several lsaBGC programs create figures from
+# thread pools, so static figure rendering is serialized.
+MPL_LOCK = threading.Lock()
+
+# Most PDF viewers cannot display pages larger than 200 x 200 inches.
+MAX_PDF_INCHES = 199.0
 
 
 def _assign_colors(categories, fixed=None):
@@ -95,6 +107,18 @@ def tree_layout(tree_file, midpoint_root=True):
 	names = [str(leaf.name) for leaf in leaves]
 	leaf_x = {str(leaf.name): depths[leaf] for leaf in leaves}
 	return names, seg_x, seg_y, leaf_x, max(depths.values())
+
+
+def _heatmap_categories(h, names):
+	"""Determine the (naturally sorted) categories present in a heatmap and their colors."""
+	categories = set()
+	for leaf in names:
+		for col in h['columns']:
+			v = h['values'].get(leaf, {}).get(col)
+			if v is not None:
+				categories.add(str(v))
+	colors = _assign_colors(categories, h.get('colors'))
+	return sorted(colors, key=_natural_key), colors
 
 
 def create_phylo_heatmap_html(tree_file, output_html, title, heatmaps=None, gene_panel=None, tip_annotation=None,
@@ -197,14 +221,7 @@ def create_phylo_heatmap_html(tree_file, output_html, title, heatmaps=None, gene
 		columns = h['columns']
 		values = h['values']
 		cat_labels = h.get('category_labels', {})
-		categories = set()
-		for leaf in names:
-			for col in columns:
-				v = values.get(leaf, {}).get(col)
-				if v is not None:
-					categories.add(str(v))
-		colors = _assign_colors(categories, h.get('colors'))
-		ordered_cats = sorted(colors, key=_natural_key)
+		ordered_cats, colors = _heatmap_categories(h, names)
 		code = {c: i for i, c in enumerate(ordered_cats)}
 		k = max(1, len(ordered_cats))
 
@@ -292,6 +309,277 @@ def create_phylo_heatmap_html(tree_file, output_html, title, heatmaps=None, gene
 						   'toImageButtonOptions': {'format': 'svg', 'filename': base}})
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Static (PDF) rendering with matplotlib.
+# ---------------------------------------------------------------------------------------------------------------------
+
+def _mpl_text(s):
+	"""Escape dollar signs so matplotlib does not interpret text from data (e.g. sample names) as math."""
+	return str(s).replace('$', r'\$')
+
+
+def _hex_to_rgb(color):
+	from matplotlib.colors import to_rgb
+	return to_rgb(color)
+
+
+def _legend_entries(heatmaps, tip_annotation, names):
+	"""Collect legend sections as [title, [(label, color, kind)]] where kind is 'square' or 'circle'."""
+	sections = []
+	if tip_annotation:
+		tip_values = tip_annotation.get('values', {})
+		tip_colors = _assign_colors([str(v) for v in tip_values.values()], tip_annotation.get('colors'))
+		present = set(str(tip_values[x]) for x in names if x in tip_values)
+		entries = [(c, tip_colors[c], 'circle') for c in sorted(tip_colors, key=_natural_key) if c in present]
+		if entries:
+			sections.append([tip_annotation.get('title', ''), entries])
+	for h in heatmaps:
+		if not h.get('show_legend', True):
+			continue
+		ordered_cats, colors = _heatmap_categories(h, names)
+		cat_labels = h.get('category_labels', {})
+		entries = [(cat_labels.get(c, c), colors[c], 'square') for c in ordered_cats]
+		if entries:
+			sections.append([h.get('title', ''), entries])
+	return sections
+
+
+def _draw_legend(ax, sections, fontsize):
+	"""Draw legend sections into an (invisible) axes."""
+	from matplotlib.lines import Line2D
+	from matplotlib.patches import Patch
+	ax.axis('off')
+	handles, labels, title_indices = [], [], []
+	for si, (title, entries) in enumerate(sections):
+		if si > 0:
+			handles.append(Patch(facecolor='none', edgecolor='none'))
+			labels.append('')
+		title_indices.append(len(handles))
+		handles.append(Patch(facecolor='none', edgecolor='none'))
+		labels.append(_mpl_text(title or ''))
+		for label, color, kind in entries:
+			if kind == 'circle':
+				handles.append(Line2D([0], [0], marker='o', color='none', markerfacecolor=color,
+									  markeredgecolor='#333333', markeredgewidth=0.5, markersize=fontsize * 0.9))
+			else:
+				handles.append(Patch(facecolor=color, edgecolor='#999999', linewidth=0.5))
+			labels.append(_mpl_text(label))
+	if not handles:
+		return
+	rows_per_col = 45
+	ncol = max(1, int(math.ceil(len(handles) / float(rows_per_col))))
+	legend = ax.legend(handles, labels, loc='upper left', frameon=False, fontsize=fontsize, ncol=ncol,
+					   handlelength=1.2, handletextpad=0.5, borderaxespad=0.0, columnspacing=1.0)
+	texts = legend.get_texts()
+	for ti in title_indices:
+		texts[ti].set_fontweight('bold')
+
+
+def create_phylo_heatmap_pdf(tree_file, output_pdf, title, heatmaps=None, gene_panel=None, tip_annotation=None,
+							 midpoint_root=True, show_tip_labels=True):
+	"""
+	Create a static PDF phylogenetic heatmap (matplotlib) - takes the same figure specification as
+	create_phylo_heatmap_html. The page grows with the number of leaves and columns (up to the maximum page size most PDF
+	viewers support, after which rows/columns and fonts are shrunk to fit).
+	"""
+	from matplotlib.figure import Figure
+	from matplotlib.collections import LineCollection, PolyCollection
+	import numpy as np
+
+	heatmaps = [h for h in (heatmaps or []) if len(h.get('columns', [])) > 0]
+	names, seg_x, seg_y, leaf_x, max_depth = tree_layout(tree_file, midpoint_root=midpoint_root)
+	n = len(names)
+	if n == 0:
+		raise RuntimeError('No leaves found in phylogeny: %s' % tree_file)
+	if max_depth <= 0:
+		max_depth = 1.0
+
+	legend_sections = _legend_entries(heatmaps, tip_annotation, names)
+
+	# ---- sizing (inches)
+	top_in, bottom_in = 0.9, 0.6
+	max_col_label = 0
+	for h in heatmaps:
+		if len(h['columns']) <= 200:
+			max_col_label = max([max_col_label] + [len(str(c)) for c in h['columns']])
+	bottom_in += min(2.5, 0.075 * max_col_label) + (0.3 if heatmaps or gene_panel else 0.0)
+
+	row_in = 0.2
+	if n * row_in + top_in + bottom_in > MAX_PDF_INCHES:
+		row_in = (MAX_PDF_INCHES - top_in - bottom_in) / float(n)
+	fontsize = max(1.5, min(8.0, row_in * 72 * 0.7))
+
+	max_label_len = max(len(x) for x in names)
+	label_in = min(4.5, 0.075 * max_label_len * (fontsize / 8.0) + 0.2) if show_tip_labels else 0.0
+	tree_in = 3.0
+	panel_in = [tree_in + label_in]
+	cell_in = 0.18
+	total_columns = sum(len(h['columns']) for h in heatmaps)
+	fixed_in = sum(panel_in) + (8.0 if gene_panel else 0.0) + 0.5 * (len(heatmaps) + (1 if gene_panel else 0))
+	legend_in = 0.0
+	if legend_sections:
+		longest = max(len(str(label)) for _, entries in legend_sections for label, _, _ in entries)
+		longest = max([longest] + [len(t) for t, _ in legend_sections])
+		legend_rows = sum(len(entries) + 2 for _, entries in legend_sections)
+		legend_in = min(6.0, 0.08 * longest + 0.6) * max(1, int(math.ceil(legend_rows / 45.0)))
+	if total_columns > 0 and fixed_in + legend_in + total_columns * cell_in > MAX_PDF_INCHES:
+		cell_in = max(0.005, (MAX_PDF_INCHES - fixed_in - legend_in) / float(total_columns))
+	for h in heatmaps:
+		panel_in.append(max(1.2, len(h['columns']) * cell_in))
+	if gene_panel:
+		panel_in.append(8.0)
+	gap_in = 0.5
+	left_in, right_in = 0.3, 0.3 + legend_in
+
+	fig_width = left_in + sum(panel_in) + gap_in * (len(panel_in) - 1) + right_in
+	fig_height = top_in + n * row_in + bottom_in
+	fig_width = min(MAX_PDF_INCHES, max(6.0, fig_width))
+	fig_height = min(MAX_PDF_INCHES, max(4.0, fig_height))
+
+	fig = Figure(figsize=(fig_width, fig_height))
+	plot_h = n * row_in / fig_height
+	# anchor the panels just below the title (any extra space from the minimum page size goes to the bottom)
+	plot_b = max(0.0, fig_height - top_in - n * row_in) / fig_height
+
+	axes = []
+	x_cursor = left_in
+	for pi, w in enumerate(panel_in):
+		ax = fig.add_axes([x_cursor / fig_width, plot_b, w / fig_width, plot_h], sharey=axes[0] if axes else None)
+		axes.append(ax)
+		x_cursor += w + gap_in
+	for ax in axes:
+		ax.set_ylim(n - 0.5, -0.5)
+		ax.tick_params(axis='y', left=False, labelleft=False)
+		for side in ['top', 'right', 'left']:
+			ax.spines[side].set_visible(False)
+
+	# ---- phylogeny panel
+	ax = axes[0]
+	segments, current = [], []
+	for x, y in zip(seg_x, seg_y):
+		if x is None:
+			if len(current) == 2:
+				segments.append(current)
+			current = []
+		else:
+			current.append((x, y))
+	ax.add_collection(LineCollection(segments, colors='#444444', linewidths=0.8))
+	label_x = max_depth * 1.03
+	tree_fraction = tree_in / float(tree_in + label_in)
+	ax.set_xlim(-0.02 * max_depth, label_x / tree_fraction)
+	if show_tip_labels:
+		guides = [[(leaf_x[name], i), (label_x * 0.995, i)] for i, name in enumerate(names)
+				  if leaf_x[name] < max_depth * 1.01]
+		ax.add_collection(LineCollection(guides, colors='#c8c8c8', linewidths=0.4, linestyles='dotted'))
+		for i, name in enumerate(names):
+			ax.text(label_x, i, _mpl_text(name), va='center', ha='left', fontsize=fontsize, clip_on=False)
+	if tip_annotation:
+		tip_values = tip_annotation.get('values', {})
+		tip_colors = _assign_colors([str(v) for v in tip_values.values()], tip_annotation.get('colors'))
+		xs, ys, cs = [], [], []
+		for i, name in enumerate(names):
+			if name in tip_values:
+				xs.append(leaf_x[name])
+				ys.append(i)
+				cs.append(tip_colors[str(tip_values[name])])
+		ax.scatter(xs, ys, c=cs, s=(fontsize * 1.1) ** 2, edgecolors='#333333', linewidths=0.4, zorder=3)
+	from matplotlib.ticker import MaxNLocator
+	ax.set_xticks([t for t in MaxNLocator(nbins=4).tick_values(0, max_depth) if 0 <= t <= max_depth * 1.0001])
+	ax.spines['bottom'].set_bounds(0, max_depth)
+	ax.tick_params(axis='x', labelsize=max(fontsize, 5))
+	ax.set_xlabel('Branch length', fontsize=max(fontsize, 6))
+	ax.set_title('Phylogeny', fontsize=max(fontsize + 1, 7))
+
+	# ---- heatmap panels
+	pi = 1
+	for h in heatmaps:
+		ax = axes[pi]
+		columns = h['columns']
+		ordered_cats, colors = _heatmap_categories(h, names)
+		rgb_colors = {c: _hex_to_rgb(colors[c]) for c in ordered_cats}
+		img = np.ones((n, len(columns), 3))
+		for i, leaf in enumerate(names):
+			leaf_values = h['values'].get(leaf, {})
+			for j, col in enumerate(columns):
+				v = leaf_values.get(col)
+				if v is not None:
+					img[i, j, :] = rgb_colors[str(v)]
+		ax.imshow(img, aspect='auto', interpolation='nearest', extent=(-0.5, len(columns) - 0.5, n - 0.5, -0.5))
+		if n * len(columns) <= 40000 and cell_in >= 0.05 and row_in >= 0.05:
+			grid = [[(j - 0.5, -0.5), (j - 0.5, n - 0.5)] for j in range(1, len(columns))]
+			grid += [[(-0.5, i - 0.5), (len(columns) - 0.5, i - 0.5)] for i in range(1, n)]
+			ax.add_collection(LineCollection(grid, colors='white', linewidths=0.6))
+		ax.set_ylim(n - 0.5, -0.5)
+		if len(columns) <= 200:
+			ax.set_xticks(range(len(columns)))
+			ax.set_xticklabels([_mpl_text(c) for c in columns], rotation=90, fontsize=max(1.5, min(fontsize, cell_in * 72 * 0.75)))
+		else:
+			ax.set_xticks([])
+		ax.set_xlabel(_mpl_text(h.get('column_label', '')), fontsize=max(fontsize, 6))
+		ax.set_title(_mpl_text(h.get('title', '')), fontsize=max(fontsize + 1, 7))
+		ax.spines['bottom'].set_visible(False)
+		pi += 1
+
+	# ---- gene architecture panel
+	if gene_panel:
+		ax = axes[pi]
+		genes = gene_panel.get('genes', {})
+		max_len = 1.0
+		for leaf in genes:
+			for g in genes[leaf]:
+				max_len = max(max_len, float(g['end']))
+		head = max_len * 0.012
+		half = 0.32
+		polys, face_colors = [], []
+		for i, leaf in enumerate(names):
+			for g in genes.get(leaf, []):
+				s, e = float(min(g['start'], g['end'])), float(max(g['start'], g['end']))
+				hl = min(head, 0.5 * (e - s))
+				if g.get('forward', True):
+					px = [s, e - hl, e, e - hl, s]
+				else:
+					px = [e, s + hl, s, s + hl, e]
+				py = [i - half, i - half, i, i + half, i + half]
+				polys.append(list(zip(px, py)))
+				face_colors.append(g.get('color', '#dbdbdb'))
+		ax.add_collection(PolyCollection(polys, facecolors=face_colors, edgecolors='#333333', linewidths=0.3))
+		ax.set_xlim(-0.01 * max_len, max_len * 1.01)
+		ax.set_ylim(n - 0.5, -0.5)
+		ax.tick_params(axis='x', labelsize=max(fontsize, 5))
+		ax.set_xlabel('Position (bp)', fontsize=max(fontsize, 6))
+		ax.set_title(gene_panel.get('title', 'Gene architecture'), fontsize=max(fontsize + 1, 7))
+
+	if legend_sections:
+		lax = fig.add_axes([(fig_width - right_in + 0.3) / fig_width, plot_b, max(0.1, legend_in) / fig_width,
+							plot_h])
+		_draw_legend(lax, legend_sections, fontsize=max(6, min(9, fontsize + 1)))
+
+	fig.suptitle(_mpl_text(title), x=left_in / fig_width, ha='left', y=1.0 - 0.25 / fig_height, va='top', fontsize=12)
+	with MPL_LOCK:
+		fig.savefig(output_pdf, format='pdf')
+
+
+def create_legend_pdf(category_colors, output_pdf, title=''):
+	"""
+	Create a PDF with just a color legend.
+	- category_colors: ordered list of [category, color] (or a dictionary of category -> color).
+	"""
+	from matplotlib.figure import Figure
+	if isinstance(category_colors, dict):
+		category_colors = list(category_colors.items())
+	entries = [(str(c), col, 'square') for c, col in category_colors]
+	rows = len(entries) + 2
+	ncol = max(1, int(math.ceil(rows / 45.0)))
+	longest = max([len(title)] + [len(e[0]) for e in entries]) if entries else len(title)
+	width = min(MAX_PDF_INCHES, max(3.0, ncol * (0.09 * longest + 0.8)))
+	height = min(MAX_PDF_INCHES, max(2.0, 0.22 * min(rows, 45) + 0.6))
+	fig = Figure(figsize=(width, height))
+	ax = fig.add_axes([0.05, 0.05, 0.9, 0.9])
+	_draw_legend(ax, [[title, entries]], fontsize=9)
+	with MPL_LOCK:
+		fig.savefig(output_pdf, format='pdf')
+
+
 def safely_create(func, *args, logObject=None, **kwargs):
 	"""Run an interactive figure creation function, logging (but not raising) any issues."""
 	try:
@@ -310,7 +598,8 @@ def safely_create(func, *args, logObject=None, **kwargs):
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Tool-specific wrappers which build figures from the track files already produced for the R-based (PDF) plots.
+# Tool-specific figure specifications, built from the track files produced by the lsaBGC programs, and their HTML/PDF
+# renderings.
 # ---------------------------------------------------------------------------------------------------------------------
 
 def _read_tsv(path, header=True):
@@ -327,8 +616,7 @@ def _read_tsv(path, header=True):
 	return rows
 
 
-def gseef_html(tree_file, track_file, output_html):
-	"""GSeeF: GCF presence (colored by BGC annotation class) across samples."""
+def _gseef_spec(track_file):
 	values = defaultdict(dict)
 	colors = {}
 	col_order = {}
@@ -338,13 +626,27 @@ def gseef_html(tree_file, track_file, output_html):
 			values[label][gcf] = annotation
 			colors[annotation] = color.strip('"')
 	columns = sorted(col_order, key=lambda x: col_order[x])
-	create_phylo_heatmap_html(tree_file, output_html, 'GSeeF: GCF presence across the species phylogeny',
-							  heatmaps=[{'title': 'GCF presence (BGC class)', 'columns': columns, 'values': values,
-										 'colors': colors, 'column_label': 'GCF IDs'}])
+	return dict(title='GSeeF: GCF presence across the species phylogeny',
+				heatmaps=[{'title': 'GCF presence (BGC class)', 'columns': columns, 'values': values,
+						   'colors': colors, 'column_label': 'GCF IDs'}])
 
 
-def see_html(tree_file, gggenes_track_file, heatmap_track_file, output_html, title):
-	"""lsaBGC-See: ortholog group presence and gene architecture for BGCs of a GCF."""
+def gseef_html(tree_file, track_file, output_html):
+	"""GSeeF: GCF presence (colored by BGC annotation class) across samples."""
+	create_phylo_heatmap_html(tree_file, output_html, **_gseef_spec(track_file))
+
+
+def gseef_pdf(tree_file, track_file, output_pdf, legend_pdf=None):
+	"""GSeeF static version (and, optionally, a separate PDF with just the annotation class legend)."""
+	spec = _gseef_spec(track_file)
+	create_phylo_heatmap_pdf(tree_file, output_pdf, **spec)
+	if legend_pdf:
+		colors = spec['heatmaps'][0]['colors']
+		create_legend_pdf([[c, colors[c]] for c in sorted(colors, key=_natural_key)], legend_pdf,
+						  title='BGC annotation class')
+
+
+def _see_spec(gggenes_track_file, heatmap_track_file, title):
 	genes = defaultdict(list)
 	og_colors = {}
 	for label, gene, start, end, forward, og, og_color in _read_tsv(gggenes_track_file):
@@ -362,15 +664,22 @@ def see_html(tree_file, gggenes_track_file, heatmap_track_file, output_html, tit
 		if og_presence != 'Absent':
 			values[label][og] = og_presence
 	columns = sorted(og_counts, key=lambda x: (-og_counts[x], _natural_key(x)))
-	create_phylo_heatmap_html(tree_file, output_html, title,
-							  heatmaps=[{'title': 'Ortholog group presence', 'columns': columns, 'values': values,
-										 'colors': og_colors, 'show_legend': False,
-										 'column_label': 'Ortholog groups'}],
-							  gene_panel={'title': 'Gene architecture', 'genes': genes})
+	return dict(title=title,
+				heatmaps=[{'title': 'Ortholog group presence', 'columns': columns, 'values': values,
+						   'colors': og_colors, 'show_legend': False, 'column_label': 'Ortholog groups'}],
+				gene_panel={'title': 'Gene architecture', 'genes': genes})
 
 
-def comprehenseeive_html(tree_file, heatmap_track_file, detection_track_file, output_html, title):
-	"""lsaBGC-ComprehenSeeIve: copy counts of GCF ortholog groups across all samples."""
+def see_html(tree_file, gggenes_track_file, heatmap_track_file, output_html, title):
+	"""lsaBGC-See: ortholog group presence and gene architecture for BGCs of a GCF."""
+	create_phylo_heatmap_html(tree_file, output_html, **_see_spec(gggenes_track_file, heatmap_track_file, title))
+
+
+def see_pdf(tree_file, gggenes_track_file, heatmap_track_file, output_pdf, title):
+	create_phylo_heatmap_pdf(tree_file, output_pdf, **_see_spec(gggenes_track_file, heatmap_track_file, title))
+
+
+def _comprehenseeive_spec(heatmap_track_file, detection_track_file, title):
 	values = defaultdict(dict)
 	og_samples = defaultdict(int)
 	for label, og, og_copy in _read_tsv(heatmap_track_file):
@@ -382,16 +691,26 @@ def comprehenseeive_html(tree_file, heatmap_track_file, detection_track_file, ou
 	if detection_track_file and os.path.isfile(detection_track_file):
 		for name, method in _read_tsv(detection_track_file):
 			detection[name] = method
-	create_phylo_heatmap_html(tree_file, output_html, title,
-							  heatmaps=[{'title': 'Ortholog group copy count', 'columns': columns, 'values': values,
-										 'colors': {'0': '#ffffff', '1': '#949292', 'Multi': '#403f3f'},
-										 'category_labels': {'0': 'Absent', '1': 'Single-copy', 'Multi': 'Multi-copy'},
-										 'column_label': 'Ortholog groups'}],
-							  tip_annotation={'title': 'GCF detection', 'values': detection} if detection else None)
+	return dict(title=title,
+				heatmaps=[{'title': 'Ortholog group copy count', 'columns': columns, 'values': values,
+						   'colors': {'0': '#ffffff', '1': '#949292', 'Multi': '#403f3f'},
+						   'category_labels': {'0': 'Absent', '1': 'Single-copy', 'Multi': 'Multi-copy'},
+						   'column_label': 'Ortholog groups'}],
+				tip_annotation={'title': 'GCF detection', 'values': detection} if detection else None)
 
 
-def sociate_html(tree_file, track_file, output_html, title):
-	"""lsaBGC-Sociate: presence of features (dis-)associated with a focal GCF."""
+def comprehenseeive_html(tree_file, heatmap_track_file, detection_track_file, output_html, title):
+	"""lsaBGC-ComprehenSeeIve: copy counts of GCF ortholog groups across all samples."""
+	create_phylo_heatmap_html(tree_file, output_html,
+							  **_comprehenseeive_spec(heatmap_track_file, detection_track_file, title))
+
+
+def comprehenseeive_pdf(tree_file, heatmap_track_file, detection_track_file, output_pdf, title):
+	create_phylo_heatmap_pdf(tree_file, output_pdf,
+							 **_comprehenseeive_spec(heatmap_track_file, detection_track_file, title))
+
+
+def _sociate_spec(track_file, title):
 	values = defaultdict(dict)
 	col_order = defaultdict(list)
 	for allele, label, order, value in _read_tsv(track_file, header=False):
@@ -401,24 +720,27 @@ def sociate_html(tree_file, track_file, output_html, title):
 		except ValueError:
 			col_order[allele].append(0.0)
 	columns = sorted(col_order, key=lambda x: (sum(col_order[x]) / len(col_order[x]), _natural_key(x)))
-	create_phylo_heatmap_html(tree_file, output_html, title,
-							  heatmaps=[{'title': 'Associated features', 'columns': columns, 'values': values,
-										 'colors': {'focal': '#242424', '-': '#6f7070', 'positive': '#4b7dc9',
-													'negative': '#db6588'},
-										 'category_labels': {'focal': 'Focal GCF', '-': 'No direction',
-															 'positive': 'Positively associated',
-															 'negative': 'Negatively associated'},
-										 'column_label': 'GCFs / ortholog groups'}])
+	return dict(title=title,
+				heatmaps=[{'title': 'Associated features', 'columns': columns, 'values': values,
+						   'colors': {'focal': '#242424', '-': '#6f7070', 'positive': '#4b7dc9',
+									  'negative': '#db6588'},
+						   'category_labels': {'focal': 'Focal GCF', '-': 'No direction',
+											   'positive': 'Positively associated',
+											   'negative': 'Negatively associated'},
+						   'column_label': 'GCFs / ortholog groups'}])
 
 
-def reconcile_html(tree_file, track_file, color_map_file, output_html, title):
-	"""lsaBGC-Reconcile: population and GCF membership of genes across an ortholog group gene tree."""
-	values = defaultdict(dict)
-	columns = []
-	for label, col_type, value in _read_tsv(track_file):
-		values[label][col_type] = value
-		if col_type not in columns:
-			columns.append(col_type)
+def sociate_html(tree_file, track_file, output_html, title):
+	"""lsaBGC-Sociate: presence of features (dis-)associated with a focal GCF."""
+	create_phylo_heatmap_html(tree_file, output_html, **_sociate_spec(track_file, title))
+
+
+def sociate_pdf(tree_file, track_file, output_pdf, title):
+	create_phylo_heatmap_pdf(tree_file, output_pdf, **_sociate_spec(track_file, title))
+
+
+def read_color_map(color_map_file):
+	"""Read a two-column (category, color) mapping file with a header, as made by util.mapColorsToCategories."""
 	colors = {}
 	if color_map_file and os.path.isfile(color_map_file):
 		with open(color_map_file) as ocmf:
@@ -431,9 +753,53 @@ def reconcile_html(tree_file, track_file, color_map_file, output_html, title):
 				row = dict(zip(header, ls))
 				if 'category' in row and 'color' in row:
 					colors[row['category']] = row['color'].strip('"')
-	create_phylo_heatmap_html(tree_file, output_html, title,
-							  heatmaps=[{'title': 'Population & GCF', 'columns': columns, 'values': values,
-										 'colors': colors}])
+	return colors
+
+
+def _reconcile_spec(track_file, color_map_file, title):
+	values = defaultdict(dict)
+	columns = []
+	for label, col_type, value in _read_tsv(track_file):
+		values[label][col_type] = value
+		if col_type not in columns:
+			columns.append(col_type)
+	return dict(title=title,
+				heatmaps=[{'title': 'Population & GCF', 'columns': columns, 'values': values,
+						   'colors': read_color_map(color_map_file)}])
+
+
+def reconcile_html(tree_file, track_file, color_map_file, output_html, title):
+	"""lsaBGC-Reconcile: population and GCF membership of genes across an ortholog group gene tree."""
+	create_phylo_heatmap_html(tree_file, output_html, **_reconcile_spec(track_file, color_map_file, title))
+
+
+def reconcile_pdf(tree_file, track_file, color_map_file, output_pdf, title):
+	spec = _reconcile_spec(track_file, color_map_file, title)
+	# the populations/GCFs color legends are written as separate PDFs by lsaBGC-Reconcile
+	spec['heatmaps'][0]['show_legend'] = False
+	create_phylo_heatmap_pdf(tree_file, output_pdf, **spec)
+
+
+def legend_pdf_from_color_map(color_map_file, output_pdf, title=''):
+	"""Create a legend PDF from a two-column (category, color) mapping file, preserving its order."""
+	entries = []
+	with open(color_map_file) as ocmf:
+		header = []
+		for i, line in enumerate(ocmf):
+			ls = line.rstrip('\n').split('\t')
+			if i == 0:
+				header = ls
+				continue
+			row = dict(zip(header, ls))
+			if 'category' in row and 'color' in row:
+				entries.append([row['category'], row['color'].strip('"')])
+	create_legend_pdf(entries, output_pdf, title=title)
+
+
+def population_designation_pdf(tree_file, sample_to_population, output_pdf, title):
+	"""popstrat: species phylogeny with leaves colored by population designation (for one identity cutoff)."""
+	create_phylo_heatmap_pdf(tree_file, output_pdf, title,
+							 tip_annotation={'title': 'Population', 'values': sample_to_population})
 
 
 def population_overview_html(tree_file, output_html, title, population_tracks, gcf_presence=None):

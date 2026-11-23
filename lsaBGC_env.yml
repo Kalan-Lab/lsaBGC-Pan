@@ -4,7 +4,6 @@ channels:
   - bioconda
 dependencies:
   - python
-  - r-base
   - setuptools
   - pip
   - zol>=1.8.0
@@ -22,22 +21,25 @@ dependencies:
   - pandas
   - xlsxwriter>=3.0.3
   - plotly>=5.0
+  - matplotlib-base>=3.6
   - scikit-learn>=1.2.2
   - numpy >2.0.0, <=2.2.6
-  - r-ggplot2
-  - r-cowplot
-  - r-phytools
-  - r-ape
-  - r-dplyr
-  - r-gggenes
-  - bioconductor-ggtree
-  - r-ggalluvial
-  - r-data.table
-  - r-plyr
-  - r-gridextra
   - intbitset
   - networkx
   - gffutils
   - edlib
   - joblib
   - cd-hit
+  # used directly by lsaBGC-Pan - listed explicitly rather than relying on them being pulled in by other packages
+  - ete3
+  - tqdm
+  - rich-argparse
+  - scipy
+  - trimal
+  - fasttree
+  - iqtree
+  - mcl
+  - hmmer
+  - pal2nal
+  - diamond
+  - curl

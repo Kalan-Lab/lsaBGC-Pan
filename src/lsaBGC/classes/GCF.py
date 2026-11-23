@@ -10,7 +10,6 @@ from collections import defaultdict
 from lsaBGC.classes.Pan import Pan
 from lsaBGC import util
 from lsaBGC import phyloplot
-from pomegranate import *
 import math
 import warnings
 from Bio import SeqIO
@@ -299,20 +298,20 @@ class GCF(Pan):
 				self.logObject.error(traceback.format_exc())
 			raise RuntimeError("Had difficulties creating iTol track for visualization of BGC gene architecture.") from e
 
-	def visualizeComprehenSeeIveGCFViaR(self, orthofinder_matrix_file, phylogeny_newick_file, heatmap_track_file,
-										detection_track_file, result_pdf_file, plot_rscript):
+	def visualizeComprehenSeeIveGCF(self, orthofinder_matrix_file, phylogeny_newick_file, heatmap_track_file,
+									detection_track_file, result_pdf_file):
 		"""
 		Definition:
-		Function to create tracks for visualization of gene architecture of BGCs belonging to GCF and run Rscript bgSee.R
-		to produce automatic PDFs of plots. In addition, bgSee.R also produces a heatmap to more easily identify homolog
-		groups which are conserved across isolates found to feature GCF.
+		Function to create tracks for visualizing the copy-count of ortholog groups found in BGCs of a GCF across all samples
+		along a phylogeny, and to render them as a static PDF and an interactive HTML (same path, .html extension).
 		********************************************************************************************************************
 		Parameters:
 		- self: GCF object
-		- gggenes_track_file: Path to file with gggenes track information (will be created/written to by function, if it doesn't exist!)
-		- heatmap_track_file: Path to file for heatmap visual component (will be created/written to by function, if it doesn't exist!)
-		- phylogeny_file: Phylogeny to use for visualization.
-		- result_pdf_file: Path to PDF file where plots from bgSee.R will be written to.
+		- orthofinder_matrix_file: The ortholog group by sample matrix.
+		- phylogeny_newick_file: Phylogeny to use for visualization.
+		- heatmap_track_file: Path to file for heatmap visual component (will be created/written to by function).
+		- detection_track_file: Path to file with GCF detection information per sample (will be created/written to).
+		- result_pdf_file: Path to the resulting PDF file.
 		********************************************************************************************************************
 		"""
 		try:
@@ -382,9 +381,9 @@ class GCF(Pan):
 
 		except Exception as e:
 			if self.logObject:
-				self.logObject.error("Had difficulties creating tracks for visualization of BGC gene architecture along phylogeny using R libraries.")
+				self.logObject.error("Had difficulties creating tracks for visualization of BGC gene architecture along phylogeny.")
 				self.logObject.error(traceback.format_exc())
-			raise RuntimeError("Had difficulties creating tracks for visualization of BGC gene architecture along phylogeny using R libraries.") from e
+			raise RuntimeError("Had difficulties creating tracks for visualization of BGC gene architecture along phylogeny.") from e
 		
 		result_html_file = os.path.splitext(result_pdf_file)[0] + '.html'
 		phyloplot.safely_create(phyloplot.comprehenseeive_html, phylogeny_newick_file, heatmap_track_file,
@@ -392,64 +391,23 @@ class GCF(Pan):
 								'lsaBGC-ComprehenSeeIve: ortholog groups of %s across all samples' % self.gcf_id,
 								logObject=self.logObject)
 
-		with open(plot_rscript, 'w') as pr:
-			pr.write('library(ggplot2)\n')
-			pr.write('library(ggtree)\n')
-			pr.write('library(gggenes)\n')
-			pr.write('library(ape)\n')
-			pr.write('library(phytools)\n')
-			pr.write('library(aplot)\n')
-			pr.write('library(dplyr)\n\n')
-
-			pr.write('phylo.tree_file <- "' + phylogeny_newick_file + '"\n') 
-			pr.write('heatmap.data_file <- "' + heatmap_track_file + '"\n')
-			pr.write('track_file <- "' + detection_track_file + '"\n')
-			pr.write('pdf_file <- "' + result_pdf_file + '"\n\n')
-
-			pr.write('phylo.tree <- read.tree(phylo.tree_file)\n')
-			pr.write('phylo.tree <- midpoint.root(phylo.tree)\n')
-			pr.write('heatmap.data <- read.table(heatmap.data_file, header=T, sep="\\t")\n')
-			pr.write('track.data <- read.table(track_file, header=T, sep="\\t")\n')
-			pr.write('tree.labels <- phylo.tree$tip.label\n')
-			pr.write('og_colors <- c("#FFFFFF", "#949292", "#403f3f")\n')
-			pr.write('names(og_colors) <- c("0", "1", "Multi")\n\n')
-
-			pr.write('pdf(pdf_file, height=30, width=30)\n')
-			pr.write('gg_tr <- ggtree(phylo.tree)\n')
-			pr.write('gg_tr <- gg_tr %<+% track.data + geom_tippoint(aes(color=detection_method), show.legend=T, size=3)\n')
-			pr.write('gg_hm <- ggplot(heatmap.data, aes(x = og, y = label, fill=as.factor(og_copy))) +\n')
-			pr.write('theme_classic() + scale_fill_manual("Copy Count", values=og_colors) +\n')
-			pr.write('xlab("Homolog Group IDs") + ylab("BGC IDs") + geom_tile(color="white") +\n')
-			pr.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
-			pr.write('gg_hm %>% insert_left(gg_tr, width=0.3)\n')
-			pr.write('dev.off()\n\n')
-
-
-		rscript_plot_cmd = ["Rscript", plot_rscript]
-		if self.logObject:
-			self.logObject.info('Running R-based plotting with the following command: %s' % ' '.join(rscript_plot_cmd))
 		try:
-			subprocess.call(' '.join(rscript_plot_cmd), shell=True, stdout=subprocess.DEVNULL,
-							stderr=subprocess.DEVNULL,
-							executable='/bin/bash')
-			assert(os.path.isfile(result_pdf_file))
+			phyloplot.comprehenseeive_pdf(phylogeny_newick_file, heatmap_track_file, detection_track_file, result_pdf_file,
+										  'lsaBGC-ComprehenSeeIve: ortholog groups of %s across all samples' % self.gcf_id)
 			if self.logObject:
-				self.logObject.info('Successfully ran: %s' % ' '.join(rscript_plot_cmd))
+				self.logObject.info('Created static visualization: %s' % result_pdf_file)
 		except Exception as e:
 			if self.logObject:
-				self.logObject.error('Had an issue running: %s' % ' '.join(rscript_plot_cmd))
+				self.logObject.error('Had an issue creating the static visualization: %s' % result_pdf_file)
 				self.logObject.error(traceback.format_exc())
-			raise RuntimeError('Had an issue running: %s' % ' '.join(rscript_plot_cmd)) from e
+			raise RuntimeError('Had an issue creating the static visualization: %s' % result_pdf_file) from e
 
-		if self.logObject:
-			self.logObject.info('Plotting completed (I think successfully)!')
-
-	def visualizeGCFViaR(self, gggenes_track_file, heatmap_track_file, phylogeny_file, result_pdf_file, plot_rscript):
+	def visualizeGCF(self, gggenes_track_file, heatmap_track_file, phylogeny_file, result_pdf_file):
 		"""
 		Definition:
-		Function to create tracks for visualization of gene architecture of BGCs belonging to GCF and run Rscript bgSee.R
-		to produce automatic PDFs of plots. In addition, bgSee.R also produces a heatmap to more easily identify homolog
-		groups which are conserved across isolates found to feature GCF.
+		Function to create tracks for visualization of gene architecture of BGCs belonging to GCF along a phylogeny,
+		alongside a heatmap to more easily identify homolog groups which are conserved across isolates found to feature
+		the GCF, and to render them as a static PDF and an interactive HTML (same path, .html extension).
 		********************************************************************************************************************
 		Parameters:
 		- self: GCF object.
@@ -458,7 +416,7 @@ class GCF(Pan):
 		- heatmap_track_file: Path to file for heatmap visual component (will be created/written to by function, if it 
 		                      doesn't exist!)
 		- phylogeny_file: Phylogeny to use for visualization.
-		- result_pdf_file: Path to PDF file where plots from bgSee.R will be written to.
+		- result_pdf_file: Path to the resulting PDF file.
 		********************************************************************************************************************
 		"""
 		try:
@@ -565,68 +523,24 @@ class GCF(Pan):
 		except Exception as e:
 			if self.logObject:
 				self.logObject.error(
-					"Had difficulties creating tracks for visualization of BGC gene architecture along phylogeny using R libraries.")
+					"Had difficulties creating tracks for visualization of BGC gene architecture along phylogeny.")
 				self.logObject.error(traceback.format_exc())
-			raise RuntimeError("Had difficulties creating tracks for visualization of BGC gene architecture along phylogeny using R libraries.") from e
+			raise RuntimeError("Had difficulties creating tracks for visualization of BGC gene architecture along phylogeny.") from e
 
 		result_html_file = os.path.splitext(result_pdf_file)[0] + '.html'
 		phyloplot.safely_create(phyloplot.see_html, phylogeny_file, gggenes_track_file, heatmap_track_file,
 								result_html_file, 'lsaBGC-See: %s' % self.gcf_id, logObject=self.logObject)
 
-		with open(plot_rscript, 'w') as pr:
-
-			pr.write('library(ggplot2)\n')
-			pr.write('library(ggtree)\n')
-			pr.write('library(gggenes)\n')
-			pr.write('library(ape)\n')
-			pr.write('library(phytools)\n')
-			pr.write('library(aplot)\n')
-			pr.write('library(dplyr)\n\n')
-
-			pr.write('phylo.tree_file <- "' + phylogeny_file + '"\n')
-			pr.write('genes.data_file <- "' + gggenes_track_file + '"\n')
-			pr.write('heatmap.data_file <- "' + heatmap_track_file + '"\n')
-			pr.write('pdf_file <- "' + result_pdf_file + '"\n\n')
-
-			pr.write('phylo.tree <- read.tree(phylo.tree_file)\n')
-			pr.write('phylo.tree <- midpoint.root(phylo.tree)\n')
-			pr.write('genes.data <- read.table(genes.data_file, header=T, sep="\\t")\n')
-			pr.write('heatmap.data <- read.table(heatmap.data_file, header=T, sep="\\t")\n')
-			pr.write('tree.labels <- phylo.tree$tip.label\n')
-			pr.write('genes.sub.data <- distinct(genes.data[c("og", "og_color")])\n')
-			pr.write('og_colors <- na.omit(c(genes.sub.data$og_color))\n')
-			pr.write('names(og_colors) <- c(na.omit(c(genes.sub.data$og)))\n\n')
-
-			pr.write('pdf(pdf_file, height=30, width=30)\n')
-			pr.write('gg_tr <- ggtree(phylo.tree)#  + ggplot2::xlim(NA, 1)\n')
-			pr.write('gg_gn <- ggplot(genes.data, aes(xmin = start, xmax = end, y = label, fill = og, forward = forward)) +\n')
-			pr.write('geom_gene_arrow(show.legend=F) + theme_void() + scale_fill_manual(values=og_colors)\n')
-			pr.write('gg_hm <- ggplot(heatmap.data, aes(x = reorder(og, -og_count), y = label, fill=og_presence)) +\n')
-			pr.write('theme_classic() + scale_fill_manual(values=og_colors) +\n')
-			pr.write('xlab("Homolog Group IDs") + ylab("BGC IDs") + geom_tile(color="white", show.legend=F) +\n')
-			pr.write('theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))\n')
-			pr.write('gg_hm %>% insert_left(gg_tr, width=0.4) %>% insert_right(gg_gn, width=1.0)\n')
-			pr.write('dev.off()\n\n')
-		
-		rscript_plot_cmd = ["Rscript", plot_rscript]
-
-		if self.logObject:
-			self.logObject.info('Running R-based plotting with the following command: %s' % ' '.join(rscript_plot_cmd))
 		try:
-			subprocess.call(' '.join(rscript_plot_cmd), shell=True, stdout=subprocess.DEVNULL,
-							stderr=subprocess.DEVNULL,
-							executable='/bin/bash')
-			assert(os.path.isfile(result_pdf_file))
+			phyloplot.see_pdf(phylogeny_file, gggenes_track_file, heatmap_track_file, result_pdf_file,
+							  'lsaBGC-See: %s' % self.gcf_id)
 			if self.logObject:
-				self.logObject.info('Successfully ran: %s' % ' '.join(rscript_plot_cmd))
+				self.logObject.info('Created static visualization: %s' % result_pdf_file)
 		except Exception as e:
 			if self.logObject:
-				self.logObject.error('Had an issue running: %s' % ' '.join(rscript_plot_cmd))
+				self.logObject.error('Had an issue creating the static visualization: %s' % result_pdf_file)
 				self.logObject.error(traceback.format_exc())
-			raise RuntimeError('Had an issue running: %s' % ' '.join(rscript_plot_cmd)) from e
-
-		if self.logObject:
-			self.logObject.info('Plotting completed (I think successfully)!')
+			raise RuntimeError('Had an issue creating the static visualization: %s' % result_pdf_file) from e
 
 	def constructCodonAlignments(self, outdir, threads=1, only_scc=False, list_alignments=False, filter_outliers=False, use_ms5=True):
 		"""
