@@ -101,7 +101,7 @@ Finally, please try re-running lsaBGC-Pan again!
 		sys.exit(1)
 
 
-def checkZolVersion(minimum_version='1.7.0'):
+def checkZolVersion(minimum_version='1.8.0'):
 	"""
 	Check that the installed zol is at least the minimum version lsaBGC-Pan is written for. Exits with guidance if not.
 	"""
@@ -154,12 +154,12 @@ def create_parser():
           - Consider using tools for dereplication/strain-clustering (such as skDER/CiDDER, dRep, PopPunk, 
             or treemmer) to prune down your set of genomes if you have more than 200.
           - Alternatively, the upper limit can be lifted with --ignore-upperbound-limit (-x).
-    * Panaroo should only be used if working with genomes belonging to a single bacterial species. If working 
-      with multiple bacterial species, consider using bofasa (or OrthoFinder). For fungal genomes, please use 
-      OrthoFinder.
-    * bofasa (https://github.com/raufs/bofasa) is designed for orthology inference across multiple bacterial 
-      species and prioritizes accuracy over speed. It requires the bofasa databases to be set up beforehand 
-      (run "bofasa setup" and make sure the BOFASA_DB_PATH environment variable is set).
+    * By default, bofasa (https://github.com/raufs/bofasa) is used for orthology inference. It is designed for 
+      orthology inference across multiple bacterial species and prioritizes accuracy over speed. It requires the 
+      bofasa databases to be set up beforehand (run "bofasa setup" and make sure the BOFASA_DB_PATH environment 
+      variable is set).
+    * Panaroo (--use-panaroo) can be used instead, but should only be used if working with genomes belonging to 
+      a single bacterial species. OrthoFinder can also be requested explicitly (--use-orthofinder).
     * Specifying fungal mode makes sure OrthoFinder is being used and that antiSMASH results were provided. 
       GECCO is not designed for fungal genomes. In addition, customized processing designed for bacterial 
       genomics is not performed and a more direct extraction of hierarchical orthogroups is applied.
@@ -184,7 +184,7 @@ def create_parser():
         - Step 1b: If antiSMASH results are provided, extract genes from full genome GenBank files. If GECCO 
                    is requested, then it will also be run and overlapping GECCO and antiSMASH BGC regions will 
                    be consolidated by taking the larger region. 
-        - Step 2: Run OrthoFinder/Panaroo/bofasa for orthology inference.
+        - Step 2: Run bofasa (default), Panaroo, or OrthoFinder (fungal mode) for orthology inference.
         - Step 3: Create species tree/phylogeny from (near-) core ortholog groups.
         - Step 4: Infer populations (will do so at multiple "core AAI" cutoffs) [no checkpoint, always rerun].
         - Step 5: Run lsaBGC-Cluster to determine evolutionary GCFs (first in parameter-testing mode to assess 
@@ -219,9 +219,10 @@ def create_parser():
 	parser.add_argument('-k', '--keep-locus-tags', action='store_true', help="Attempt to keep original locus tags in antiSMASH GenBank\nfiles - if locus tag is missing for one or more CDS\nfeatures new ones will be generated for the sample (experimental).", required=False, default=False)
 	parser.add_argument('-rg', '--run-gecco', action='store_true', help="If antiSMASH results are provided also run GECCO for\nannotation of BGCs.", required=False, default=False)
 
-	parser.add_argument('-up', '--use-panaroo', action='store_true', help='Use Panaroo instead of OrthoFinder for orthology inference.\nRecommended if investigating a single bacterial species.', default=False, required=False)
-	parser.add_argument('-ub', '--use-bofasa', action='store_true', help='Use bofasa instead of OrthoFinder for orthology inference.\nRecommended if investigating multiple bacterial species.\nRequires bofasa databases to be set up (bofasa setup).', default=False, required=False)
-	parser.add_argument('-omc', '--run-coarse-orthofinder', action='store_true', help='Use coarse clustering for orthogroups in OrthoFinder instead\nof the more resolute hierarchical determined homolog groups.\nThere are some advantages to coarse OGs, including their\nconstruction being deterministic.', required=False, default=False)
+	parser.add_argument('-up', '--use-panaroo', action='store_true', help='Use Panaroo instead of bofasa (the default) for orthology inference.\nRecommended only if investigating a single bacterial species.', default=False, required=False)
+	parser.add_argument('-uo', '--use-orthofinder', action='store_true', help='Use OrthoFinder instead of bofasa (the default) for orthology\ninference. Automatically used in fungal mode.', default=False, required=False)
+	parser.add_argument('-brs', '--bofasa-rooting-seeds', type=int, help='The maximum number of nodes bofasa tries for rooting (passed to\n"bofasa run -rs"); a random sampling is performed. Only applies\nwhen bofasa is used [Default is 1; uses midpoint rooting].', required=False, default=1)
+	parser.add_argument('-omc', '--run-coarse-orthofinder', action='store_true', help='Use coarse clustering for orthogroups in OrthoFinder (if used) instead\nof the more resolute hierarchical determined homolog groups.\nThere are some advantages to coarse OGs, including their\nconstruction being deterministic.', required=False, default=False)
 	parser.add_argument('-ohq', '--run-msa-orthofinder', action='store_true', help='Run OrthoFinder using multiple sequence alignments instead of\nDendroBlast to determine hierarchical ortholog groups.', required=False, default=False)
 
 	parser.add_argument('-hqp', '--high-quality-phylogeny', action='store_true', help='Prioritize quality over speed for phylogeny construction.', required=False, default=False)
@@ -240,7 +241,7 @@ def create_parser():
 	parser.add_argument('-y', '--yes', '--resume', dest='yes', action='store_true', help='Automatically continue (resume) if the output directory already exists\ninstead of prompting - checkpoint files will be used to skip completed\nsteps. Needed for resuming in non-interactive settings (e.g. Docker\nor batch jobs), such as after the break following step 5.', required=False, default=False)
 	parser.add_argument('-nb', '--no-break', action='store_true', help='No break after step 5 to assess GCF clustering and population\nstratification and adapt parameters.', required=False, default=False)
 
-	parser.add_argument('-zp', '--zol-parameters', help="The parameters to run zol analyses with - please surround by quotes,\ne.g. \"-am muscle\" (requires zol >= 1.7.0) [Default is \"\"].", default="")
+	parser.add_argument('-zp', '--zol-parameters', help="The parameters to run zol analyses with - please surround by quotes,\ne.g. \"-am muscle\" (requires zol >= 1.8.0) [Default is \"\"].", default="")
 	parser.add_argument('-zhq', '--zol-high-quality-preset', action='store_true', help='Use preset of options for performing high-quality and comprehensive zol\nanalyses instead of prioritizing speed (runs zol with: -am muscle -s -b).')
 	parser.add_argument('-zl', '--zol-keep-multi-copy', action='store_true', help='Include all GCF instances in zol analysis, not just the most\nrepresentative instance from each sample/genome.', required=False, default=False)
 	
@@ -291,7 +292,8 @@ def lsaBGC():
 	max_genomes = None if ignore_upperbound_limit_flag else 200
 
 	use_panaroo_flag = myargs.use_panaroo
-	use_bofasa_flag = myargs.use_bofasa
+	use_orthofinder_flag = myargs.use_orthofinder
+	bofasa_rooting_seeds = myargs.bofasa_rooting_seeds
 	run_coarse_orthofinder_flag = myargs.run_coarse_orthofinder
 	run_msa_orthofinder_flag = myargs.run_msa_orthofinder
 	
@@ -432,19 +434,32 @@ def lsaBGC():
 	with open(parameters_file, 'a+') as parameters_handle:
 		parameters_handle.write(' '.join(sys.argv) + '\n')
 
-	if use_panaroo_flag and use_bofasa_flag:
-		msg = 'Both --use-panaroo and --use-bofasa were specified, please only specify one, exiting ...'
+	# Determine the orthology inference method: bofasa (default), Panaroo (--use-panaroo), or OrthoFinder
+	# (--use-orthofinder or fungal mode).
+	if use_panaroo_flag and use_orthofinder_flag:
+		msg = 'Both --use-panaroo and --use-orthofinder were specified, please only specify one, exiting ...'
+		sys.stderr.write(msg + '\n')
+		logObject.error(msg)
+		sys.exit(1)
+	if bofasa_rooting_seeds < 1:
+		msg = '--bofasa-rooting-seeds must be at least 1, exiting ...'
 		sys.stderr.write(msg + '\n')
 		logObject.error(msg)
 		sys.exit(1)
 
+	orthology_method = 'bofasa'
+	if use_panaroo_flag:
+		orthology_method = 'panaroo'
+	elif use_orthofinder_flag:
+		orthology_method = 'orthofinder'
+
 	if fungal_flag:
-		if use_panaroo_flag or use_bofasa_flag:
-			msg = 'fungal mode triggered but --use-panaroo or --use-bofasa also specified, these are designed for bacteria - so using OrthoFinder instead.'
-			sys.stderr.write(msg + '\n')
-			logObject.warning(msg)
-		use_panaroo_flag = False
-		use_bofasa_flag = False
+		if orthology_method != 'orthofinder':
+			if use_panaroo_flag:
+				msg = 'fungal mode triggered but --use-panaroo also specified, which is designed for bacteria - so using OrthoFinder instead.'
+				sys.stderr.write(msg + '\n')
+				logObject.warning(msg)
+			orthology_method = 'orthofinder'
 		if not (antismash_directory != None and os.path.isdir(antismash_directory)):
 			msg = 'fungal mode triggered but no antiSMASH results were provided. GECCO is not designed for fungi, so exiting ...'
 			sys.stderr.write(msg + '\n')
@@ -469,7 +484,21 @@ def lsaBGC():
 				sys.exit(1)
 		os.environ["GECCO_DOMAIN_WEIGHTS_PKL_FILE"] = gw_pkl
 
-	if use_panaroo_flag:
+	if orthology_method != 'orthofinder' and (run_coarse_orthofinder_flag or run_msa_orthofinder_flag):
+		msg = 'Warning: --run-coarse-orthofinder / --run-msa-orthofinder only apply when OrthoFinder is used for orthology inference (--use-orthofinder or fungal mode), ignoring them.'
+		sys.stderr.write(msg + '\n')
+		logObject.warning(msg)
+
+	msg = 'Using %s for orthology inference.' % {'bofasa': 'bofasa', 'panaroo': 'Panaroo', 'orthofinder': 'OrthoFinder'}[orthology_method]
+	sys.stdout.write(msg + '\n')
+	logObject.info(msg)
+
+	# dependency checks for the orthology inference method are skipped if orthology inference was already completed
+	# (e.g. when resuming an older run which used a different method).
+	orthology_already_done = os.path.isfile(outdir + 'Checkpoint_Files/Step_2.txt')
+	if orthology_already_done:
+		pass
+	elif orthology_method == 'panaroo':
 		if shutil.which('panaroo') is None:
 			sys.stderr.write("""
 [ERROR] Panaroo requested but not installed! 
@@ -480,10 +509,10 @@ $ pip3 install git+https://github.com/gtonkinhill/panaroo
 Then, please try re-running lsaBGC-Pan again!
 """)
 			sys.exit(1)
-	elif use_bofasa_flag:
+	elif orthology_method == 'bofasa':
 		if shutil.which('bofasa') is None:
 			sys.stderr.write("""
-[ERROR] bofasa requested but not installed! 
+[ERROR] bofasa (the default for orthology inference) is not installed! 
 
 > Please try running the following in your lsaBGC-Pan conda environment:
 $ conda install -c conda-forge -c bioconda bofasa
@@ -495,10 +524,12 @@ Then, please try re-running lsaBGC-Pan again!
 		bofasa_db_dir = os.getenv('BOFASA_DB_PATH', '').strip()
 		if not bofasa_db_dir or not os.path.isfile(os.path.join(bofasa_db_dir, 'database_location_paths.txt')):
 			sys.stderr.write("""
-[ERROR] bofasa requested but its databases do not appear to be set up! 
+[ERROR] bofasa (the default for orthology inference) is being used but its databases do not appear to be set up! 
 
 > Please make sure the BOFASA_DB_PATH environment variable is set and that databases were downloaded:
 $ bofasa setup --skip-genomad
+
+> Alternatively, use Panaroo (--use-panaroo; single species only) or OrthoFinder (--use-orthofinder) instead.
 
 Then, please try re-running lsaBGC-Pan again!
 """)
@@ -509,7 +540,7 @@ Then, please try re-running lsaBGC-Pan again!
 		checkOrthoFinderSetup()
 
 
-	# zol >= 1.7.0 is required (e.g. -qa/--quality-align was replaced by -am/--aligner-method)
+	# zol >= 1.8.0 is required (e.g. -qa/--quality-align was replaced by -am/--aligner-method in v1.7.0)
 	checkZolVersion()
 
 	parallel_jobs_4thread = max(math.floor(threads / 4), 1)
@@ -977,7 +1008,7 @@ is experimental and might cause issues.
 	ortholog_matrix_file = outdir + 'Sample_by_Orthogroups_Matrix.tsv'
 	step_2_checkpoint_file = check_dir + 'Step_2.txt'
 	if not os.path.isfile(step_2_checkpoint_file):
-		if use_bofasa_flag:
+		if orthology_method == 'bofasa':
 			bofasa_input_dir = scratch_dir + 'bofasa_inputs/'
 			bofasa_prep_dir = scratch_dir + 'bofasa_prep/'
 			bofasa_results_dir = outdir + 'bofasa_Results/'
@@ -986,10 +1017,10 @@ is experimental and might cause issues.
 				if os.path.isdir(d):
 					shutil.rmtree(d)
 
-			og_results_matrix = util.runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, bofasa_results_dir, logObject, threads=threads, ignore_upperbound_limit=ignore_upperbound_limit_flag)
+			og_results_matrix = util.runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, bofasa_results_dir, logObject, threads=threads, ignore_upperbound_limit=ignore_upperbound_limit_flag, rooting_seeds=bofasa_rooting_seeds)
 			if og_results_matrix and os.path.isfile(og_results_matrix):
 				shutil.move(og_results_matrix, ortholog_matrix_file)
-		elif not use_panaroo_flag:
+		elif orthology_method == 'orthofinder':
 			proteomes_dir = scratch_dir + 'orthofinder_inputs/'
 			orthofinder_results_dir = outdir + 'OrthoFinder_Results/'
 			util.setupReadyDirectory([proteomes_dir])

@@ -1654,7 +1654,7 @@ def runPanaroo(detailed_BGC_listing_file, panaroo_input_dir, results_directory, 
 		sys.exit(1)
 	return result_file
 
-def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, results_directory, logObject, threads=1, ignore_upperbound_limit=False):
+def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, results_directory, logObject, threads=1, ignore_upperbound_limit=False, rooting_seeds=1):
 	"""
 	Definition:
 	Wrapper function to run bofasa (https://github.com/raufs/bofasa) for multi-species bacterial orthology inference.
@@ -1667,6 +1667,7 @@ def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, resu
 	- logObject: A python logging object.
 	- threads (optional): The number of threads to use. Default is 1.
 	- ignore_upperbound_limit (optional): Pass --ignore-upperbound-limit to bofasa prep to allow > 200 genomes.
+	- rooting_seeds (optional): The maximum number of nodes bofasa run tries for rooting (-rs). Default is 1.
 	********************************************************************************************************************
 	Returns:
 	- result_file: The resulting orthogroup by sample carriage matrix.
@@ -1699,7 +1700,7 @@ def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, resu
 							stdout=bofasa_prep_dir.rstrip('/') + '.stdout.log', stderr=bofasa_prep_dir.rstrip('/') + '.stderr.log')
 
 		bofasa_ogs_file = results_directory + 'Final_Results/Protein_Ortholog_Groups.tsv'
-		run_cmd = ['bofasa', 'run', '-i', bofasa_prep_dir, '-o', results_directory, '-c', str(threads), '-y']
+		run_cmd = ['bofasa', 'run', '-i', bofasa_prep_dir, '-o', results_directory, '-c', str(threads), '-rs', str(rooting_seeds), '-y']
 		runCmdViaSubprocess(run_cmd, logObject=logObject, check_files=[bofasa_ogs_file],
 							stdout=results_directory.rstrip('/') + '.stdout.log', stderr=results_directory.rstrip('/') + '.stderr.log')
 
@@ -2250,15 +2251,18 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			'IS Finder (E-value)',
 			'MIBiG Annotation (E-value)',
 			'VOG Annotation (E-value)',
-			'VFDB Annotation (E-value)'
+			'VFDB Annotation (E-value)',
+			'DefenseFinder Annotation (E-value)'
 		]
 
 		# Optional HyPhy fields when zol is run with HyPhy
 		if zol_high_qual_flag:
 			zol_sheet_header += [
 				'GARD Partitions Based on Recombination Breakpoints',
+				'Gene-wide dN/dS by MG94',
 				'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
 				'Average delta(Beta, Alpha) by FUBAR across sites',
+				'Gene-wide dN/dS by FUBAR (Sum of Beta / Sum of Alpha)',
 				'Proportion of Sites Under Selection which are Positive',
 				'P-value for gene-wide episodic selection by BUSTED'
 			]
@@ -2331,9 +2335,12 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			'Protein to Nucleotide Identity Ratio',
 			'Tajima\'s D',
 			'GARD Partitions Based on Recombination Breakpoints',
+			'Gene-wide dN/dS by MG94',
 			'Number of Sites Identified as Under Positive or Negative Selection by FUBAR',
 			'Average delta(Beta, Alpha) by FUBAR across sites',
+			'Gene-wide dN/dS by FUBAR (Sum of Beta / Sum of Alpha)',
 			'Proportion of Sites Under Selection which are Positive',
+			'P-value for gene-wide episodic selection by BUSTED',
 			'Proportion of Filtered Codon Alignment is Segregating Sites',
 			'Entropy',
 			'Upstream Region Entropy',
@@ -2387,7 +2394,7 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 				cell_range = f"{col_map[col_name]}2:{col_map[col_name]}{num_rows}"
 				zr_sheet.conditional_format(cell_range, fmt_dict)
 
-		# Apply coloring similar to zol v1.7.0 using dynamic mapping
+		# Apply coloring similar to zol v1.8.0 using dynamic mapping
 		_fmt_if('Proportion of Total Gene Clusters with OG', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#CCCCCC", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
 		_fmt_if('Proportion of Complete Gene Cluster Instances with OG', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#CCCCCC", "min_value": 0.0, "max_value": 1.0, "min_type": "num", "max_type": "num"})
 		_fmt_if('OG Median Length (bp)', {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#5A8AC6", "min_value": 100, "max_value": 2500, "min_type": "num", "max_type": "num"})
@@ -2411,13 +2418,16 @@ def createFinalSpreadsheets(detailed_BGC_listing_with_Pop_and_GCF_map_file, zol_
 			_fmt_if('Median Beta-RD-gc', {"type": "3_color_scale", "min_color": "#F8696B", "mid_color": "#FFEB84", "max_color": "#63BE7B", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25, "min_type": "num", "mid_type": "num", "max_type": "num"})
 			_fmt_if('Max Beta-RD-gc', {"type": "3_color_scale", "min_color": "#F8696B", "mid_color": "#FFEB84", "max_color": "#63BE7B", "min_value": 0.75, "mid_value": 1.0, "max_value": 1.25, "min_type": "num", "mid_type": "num", "max_type": "num"})
 
-		# HyPhy (zol high-quality preset) columns coloring to match zol v1.7.0
+		# HyPhy (zol high-quality preset) columns coloring to match zol v1.8.0
 		if 'GARD Partitions Based on Recombination Breakpoints' in col_map:
 			cell_range = f"{col_map['GARD Partitions Based on Recombination Breakpoints']}2:{col_map['GARD Partitions Based on Recombination Breakpoints']}{num_rows}"
 			zr_sheet.conditional_format(cell_range, {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#F8696B", "min_value": 1, "max_value": 5, "min_type": "num", "max_type": "num"})
 		if 'Number of Sites Identified as Under Positive or Negative Selection by FUBAR' in col_map:
 			cell_range = f"{col_map['Number of Sites Identified as Under Positive or Negative Selection by FUBAR']}2:{col_map['Number of Sites Identified as Under Positive or Negative Selection by FUBAR']}{num_rows}"
 			zr_sheet.conditional_format(cell_range, {"type": "2_color_scale", "min_color": "#FFFFFF", "max_color": "#B8D4B8", "min_value": 0, "max_value": 10, "min_type": "num", "max_type": "num"})
+		# Gene-wide dN/dS (added in zol v1.8.0) - coloring matches zol
+		for dnds_col in ['Gene-wide dN/dS by MG94', 'Gene-wide dN/dS by FUBAR (Sum of Beta / Sum of Alpha)']:
+			_fmt_if(dnds_col, {"type": "3_color_scale", "min_color": "#E6B0AA", "mid_color": "#FFFFFF", "max_color": "#B8D4B8", "min_value": 0, "mid_value": 1, "max_value": 2, "min_type": "num", "mid_type": "num", "max_type": "num"})
 		if 'Average delta(Beta, Alpha) by FUBAR across sites' in col_map:
 			cell_range = f"{col_map['Average delta(Beta, Alpha) by FUBAR across sites']}2:{col_map['Average delta(Beta, Alpha) by FUBAR across sites']}{num_rows}"
 			zr_sheet.conditional_format(cell_range, {"type": "3_color_scale", "min_color": "#E6B0AA", "mid_color": "#FFFFFF", "max_color": "#B8D4B8", "min_value": -5, "mid_value": 0, "max_value": 5, "min_type": "num", "mid_type": "num", "max_type": "num"})

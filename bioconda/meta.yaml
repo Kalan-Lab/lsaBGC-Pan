@@ -25,7 +25,7 @@ requirements:
     - python >=3.10
     - r-base
     - axel
-    - zol >=1.7.0
+    - zol >=1.8.0
     - famsa
     - orthofinder =2.5.5
     - pyseer >=1.3
