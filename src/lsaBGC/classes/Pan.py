@@ -568,9 +568,11 @@ class Pan:
 					else:
 						clustered_counts[param_id] += int(ls[3])
 						cluster_counts[param_id] += 1
+						# unannotated BGCs ('NA') and GECCO/antiSMASH 'Unknown' types are treated as one "Unknown" class,
+						# which is always listed first in the plotting inputs - so exclude both here to avoid duplicates.
 						annotations = set(
 							[x.split(':')[0].replace('-', '.') for x in ls[-1].split('; ') if
-							 x.split(':')[0] != 'NA'])
+							 x.split(':')[0].strip().lower() not in ('na', 'unknown')])
 						if len(ls[-1].split('; ')) > 1: cluster_mixedannot_counts[param_id] += 1
 						if len(annotations) > 1: cluster_mixedannot_wohypo_counts[param_id] += 1
 						all_annotation_classes = all_annotation_classes.union(annotations)
@@ -654,7 +656,11 @@ class Pan:
 						annot_count = defaultdict(float)
 						for an in annotations:
 							ans = an.split(':')
-							annot_count[ans[0].replace('-', '.')] = float(ans[1])
+							an_class = ans[0].replace('-', '.')
+							# merge unannotated ('NA') and 'Unknown' BGC types into a single 'NA' (plotted as "Unknown")
+							if an_class.strip().lower() in ('na', 'unknown'):
+								an_class = 'NA'
+							annot_count[an_class] += float(ans[1])
 
 						annotation_class_abd = [annot_count['NA']]
 						for ac in sorted(all_annotation_classes):

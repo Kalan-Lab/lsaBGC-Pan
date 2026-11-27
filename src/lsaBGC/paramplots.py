@@ -98,7 +98,9 @@ def create_param_influence_report(plot_input_1_file, plot_annot_file, plot_input
 	annot_colors = {}
 	if annot_classes:
 		annot_colors[annot_classes[0]] = '#808080'
-		for c, col in zip(annot_classes[1:], _ramp('Set2', len(annot_classes) - 1)):
+		# de-duplicate and never re-color the "Unknown" class (guards against older plotting inputs listing it twice)
+		other_classes = [c for c in dict.fromkeys(annot_classes[1:]) if c != annot_classes[0]]
+		for c, col in zip(other_classes, _ramp('Set2', len(other_classes))):
 			annot_colors[c] = col
 
 	inflations = sorted(set(_fmt(r['Inflation']) for r in overview), key=lambda x: float(x))
@@ -286,7 +288,8 @@ def create_param_influence_report(plot_input_1_file, plot_annot_file, plot_input
 			gcf_totals, gcf_annots = {}, defaultdict(dict)
 			for r in largest_filt:
 				gcf_totals[r['GCF']] = _num(r['Total.BGCs']) or 0.0
-				gcf_annots[r['GCF']][r['Annotation']] = _num(r['Count']) or 0.0
+				# accumulate rather than overwrite, in case an annotation class appears more than once for a GCF
+				gcf_annots[r['GCF']][r['Annotation']] = gcf_annots[r['GCF']].get(r['Annotation'], 0.0) + (_num(r['Count']) or 0.0)
 			order = sorted(gcf_totals, key=lambda g: (gcf_totals[g], _natural_key(g)))
 			bottom = np.zeros(len(order))
 			for annot in sorted(set(a for g in gcf_annots for a in gcf_annots[g])):
