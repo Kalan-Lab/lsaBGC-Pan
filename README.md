@@ -26,7 +26,7 @@
 
 ✔️ Works for both fungi & bacteria
 
-✔️ Allows for joint analysis of antiSMASH & GECCO BGC predictions (in analysis of _Streptomyces olivaceus_ - this leads to a 42.4% increase in distinct GCFs to using antiSMASH alone)
+✔️ Allows joint analysis of antiSMASH & GECCO BGC predictions. In the Streptomyces olivaceus showcase (23 genomes), adding GCFs made up only of GECCO BGCs increases the number of distinct GCFs by 58% over GCFs that contain antiSMASH BGCs (95 vs. 60; 76% if singletons are included).
 
 ✔️ Better consideration for incomplete BGCs due to assembly fragmentation
 
@@ -34,7 +34,7 @@
 
 ✔️ Improved consolidated spreadsheet that is easier to assess
 
-✔️ Support for small scale (< 30 genomes) analysis on laptop with minimal databases (~5 GB).
+✔️ Support for small scale (< 30 genomes) analysis on laptop with minimal databases (~13 GB).
 
 ✔️ Bioconda installation tested on both macOS & Linux with easy-to-use Docker image & wrapper script also coming soon!
 
