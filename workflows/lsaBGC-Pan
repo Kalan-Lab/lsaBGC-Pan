@@ -165,11 +165,15 @@ def create_parser():
       GECCO is not designed for fungal genomes. In addition, customized processing designed for bacterial 
       genomics is not performed and a more direct extraction of hierarchical orthogroups is applied.
 	* Precomputed GECCO results (e.g. from nf-core/funcscan) can be provided with --precomputed-gecco-directory
-	  together with the genomes (-g) GECCO was run on. The directory should contain one subdirectory per 
-	  sample - named exactly as the genome FASTA file (minus extension) - with the GECCO "run" results 
-	  (*.clusters.tsv and cluster GenBank files) for that genome. lsaBGC-Pan still performs its own gene-calling 
-	  and recreates BGC GenBank files from it using the GECCO BGC coordinates, types, and domain annotations.
-	  Scaffold names and sequences are validated to make sure GECCO results correspond to the genomes provided.
+	  together with either the genomes (-g) or antiSMASH results (-a) for the same assemblies GECCO was run on.
+	  The directory should contain one subdirectory per sample - named exactly as the genome FASTA file (minus
+	  extension), or as the sample's antiSMASH results subdirectory - with the GECCO "run" results
+	  (*.clusters.tsv and cluster GenBank files) for that genome. GECCO's own gene calls are not used: BGC
+	  GenBank files are recreated using the GECCO BGC coordinates, types, and domain annotations together with
+	  lsaBGC-Pan's gene calls (-g) or the gene calls in the antiSMASH full genome GenBanks (-a). With antiSMASH
+	  results, overlapping GECCO and antiSMASH BGCs are consolidated as with --run-gecco, and scaffolds renamed
+	  by antiSMASH are matched to GECCO results via the "Original ID" antiSMASH records. Scaffold names and
+	  sequences are validated to make sure GECCO results correspond to the genomes provided.
 	* The name of the sample-specific antiSMASH results directory will be used as the sample name, not the 
 	  name of the full-genome GenBank file within it. So the sample name will be controlled by the antiSMASH 
 	  argument --output-dir and not --output-basename.
@@ -183,8 +187,9 @@ def create_parser():
         - Step 1a: If genomes are provided, perform gene-calling with p(y)rodigal and annotate BGCs with GECCO
                    (or use precomputed GECCO results if provided)
         - Step 1b: If antiSMASH results are provided, extract genes from full genome GenBank files. If GECCO 
-                   is requested, then it will also be run and overlapping GECCO and antiSMASH BGC regions will 
-                   be consolidated by taking the larger region. 
+                   is requested (or precomputed GECCO results are provided), then it will also be run (or
+                   processed) and overlapping GECCO and antiSMASH BGC regions will be consolidated by taking
+                   the larger region.
         - Step 2: Run bofasa (default), Panaroo, or OrthoFinder (fungal mode) for orthology inference.
         - Step 3: Create species tree/phylogeny from (near-) core ortholog groups.
         - Step 4: Infer populations (will do so at multiple "core AAI" cutoffs) [no checkpoint, always rerun].
@@ -213,7 +218,7 @@ def create_parser():
 
 	parser.add_argument('-a', '--antismash-results-directory', help="A directory with subdirectories corresponding to antiSMASH results\nper sample/genome [Optional].", required=False, default=None)
 	parser.add_argument('-g', '--genomes', nargs='+', help="Paths to genomes or directories with genomes in FASTA format.\nWill run GECCO for BGC-predictions [Optional].", required=False, default=[])
-	parser.add_argument('-pg', '--precomputed-gecco-directory', help="A directory with subdirectories corresponding to precomputed GECCO\nresults per sample/genome. Requires genomes GECCO was run on to\nalso be provided via -g/--genomes [Optional].", required=False, default=None)
+	parser.add_argument('-pg', '--precomputed-gecco-directory', help="A directory with subdirectories corresponding to precomputed GECCO\nresults per sample/genome. Requires the genomes GECCO was run on to\nalso be provided via -g/--genomes, or antiSMASH results for the same\ngenomes via -a/--antismash-results-directory [Optional].", required=False, default=None)
 	parser.add_argument('-o', '--output-directory', help="Parent output/workspace directory.", required=True)
 
 	parser.add_argument('-f', '--fungal', action='store_true', help="Specify if input are from fungal genomes. Only possible\nif antiSMASH results are provided.", required=False, default=False)
@@ -395,8 +400,12 @@ def lsaBGC():
 			msg = 'Precomputed GECCO results directory %s does not exist.' % precomputed_gecco_directory
 			sys.stderr.write(msg + '\n')
 			sys.exit(1)
-		if not raw_genomes_provided or antismash_directory != None:
-			msg = 'Precomputed GECCO results can only be used together with genomes provided via -g/--genomes (the same genome FASTA files GECCO was run on) and not with antiSMASH results.'
+		if not raw_genomes_provided and antismash_directory == None:
+			msg = 'Precomputed GECCO results must be provided together with either genomes via -g/--genomes or antiSMASH results via -a/--antismash-results-directory (for the same genome assemblies GECCO was run on).'
+			sys.stderr.write(msg + '\n')
+			sys.exit(1)
+		if run_gecco_flag:
+			msg = 'Both precomputed GECCO results (-pg) and --run-gecco were specified, please only specify one.'
 			sys.stderr.write(msg + '\n')
 			sys.exit(1)
 		if fungal_flag:
@@ -483,7 +492,7 @@ def lsaBGC():
 			sys.stderr.write(msg + '\n')
 			logObject.warning(msg)
 			run_gecco_flag = False
-	elif raw_genomes_provided or run_gecco_flag:
+	elif raw_genomes_provided or run_gecco_flag or precomputed_gecco_directory != None:
 		gw_pkl = outdir + 'GECCO_PF_Weights.pkl'
 		if not os.path.isfile(gw_pkl) or os.path.getsize(gw_pkl) == 0:
 			curl_cmd = ['curl', '-fL', 'https://github.com/Kalan-Lab/lsaBGC/raw/main/db/GECCO_PF_Weights.pkl', '-o', gw_pkl]
@@ -649,6 +658,10 @@ is experimental and might cause issues.
 					sys.stderr.write(msg + '\n')
 					logObject.warning(msg)
 
+			# keep track of the original antiSMASH full genome GenBanks (prior to adding locus tags) to look up original
+			# sequence identifiers recorded by antiSMASH, if precomputed GECCO results are provided.
+			antismash_original_genomes = dict(sample_genomes)
+
 			if sample_count < 4 or (max_genomes != None and sample_count > max_genomes):
 				msg = 'lsaBGC-Pan is designed for investigation of 4 to 200 genomes per analysis. Only found %d genomes.' % sample_count
 				if sample_count >= 4:
@@ -799,7 +812,12 @@ is experimental and might cause issues.
 				antismash_bgc_locations = util.processAntiSMASHBGCtoGenomeMappingResults(antismash_location_data, logObject)
 				gecco_bgc_locations = []
 
-				if run_gecco_flag:
+				if precomputed_gecco_directory != None:
+					# recreate GECCO BGC GenBanks using the antiSMASH-based full genome GenBanks (and their gene calls).
+					gecco_results_dir = outdir + 'GECCO_Results/'
+					util.setupReadyDirectory([gecco_results_dir])
+					gecco_bgc_locations = util.processPrecomputedGECCOResults(precomputed_gecco_directory, sample_genomes, gecco_results_dir, logObject, original_genomes=antismash_original_genomes)
+				elif run_gecco_flag:
 					gecco_results_dir = outdir + 'GECCO_Results/'
 					util.setupReadyDirectory([gecco_results_dir])
 					gecco_cmds = []

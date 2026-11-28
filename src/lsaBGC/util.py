@@ -1827,22 +1827,56 @@ def runBofasa(detailed_BGC_listing_file, bofasa_input_dir, bofasa_prep_dir, resu
 		sys.exit(1)
 	return result_file
 
-def processPrecomputedGECCOResults(gecco_precomputed_dir, sample_genomes, gecco_results_dir, logObject):
+def getAntiSMASHOriginalScaffoldIDs(genome_gbk):
+	"""
+	Definition:
+	Function to get the original sequence identifiers of records in an antiSMASH full genome GenBank file. antiSMASH
+	renames records whose identifiers are too long (unless run with --allow-long-headers), contain invalid characters,
+	or are duplicated, and records the original identifier in the "Original ID" field of the antiSMASH-Data
+	structured comment.
+	********************************************************************************************************************
+	Parameters:
+	- genome_gbk: An antiSMASH full genome GenBank file.
+	********************************************************************************************************************
+	Returns:
+	- original_to_current: Dictionary mapping original record identifiers to the (renamed) record identifiers.
+	********************************************************************************************************************
+	"""
+	original_to_current = {}
+	with open(genome_gbk) as ogg:
+		for rec in SeqIO.parse(ogg, 'genbank'):
+			structured_comment = rec.annotations.get('structured_comment', {})
+			original_id = None
+			for section in structured_comment:
+				if section.endswith('-Data') and 'Original ID' in structured_comment[section]:
+					original_id = str(structured_comment[section]['Original ID']).strip()
+					break
+			if original_id and original_id != rec.id:
+				original_to_current[original_id] = rec.id
+	return original_to_current
+
+def processPrecomputedGECCOResults(gecco_precomputed_dir, sample_genomes, gecco_results_dir, logObject, original_genomes=None):
 	"""
 	Definition:
 	Function to process precomputed GECCO results (e.g. from nf-core/funcscan) for use in lsaBGC-Pan. Only the BGC
 	coordinates and types (from the *.clusters.tsv files) and the Pfam domain annotations (from the cluster GenBank
-	files) are used. BGC GenBank files are recreated from the lsaBGC-Pan gene-called full genome GenBank files so that
-	CDS features and locus tags are consistent with the rest of the analysis.
+	files) are used. BGC GenBank files are recreated from the full genome GenBank files used by lsaBGC-Pan (gene-called
+	by lsaBGC-Pan when genomes are provided, or from antiSMASH results) so that CDS features and locus tags are
+	consistent with the rest of the analysis.
 
-	The precomputed GECCO directory is expected to have one subdirectory per sample, named the same as the genome
-	FASTA file (minus extension) provided to lsaBGC-Pan, each containing GECCO "run" results for that same FASTA.
+	The precomputed GECCO directory is expected to have one subdirectory per sample, named the same as the sample in
+	lsaBGC-Pan - i.e. the genome FASTA file name (minus extension) when genomes are provided, or the name of the
+	sample's antiSMASH results subdirectory when antiSMASH results are provided - each containing GECCO "run" results
+	for the same genome assembly. Sequence identifiers from GECCO which were renamed by antiSMASH are matched via the
+	"Original ID" antiSMASH records in its full genome GenBank files.
 	********************************************************************************************************************
 	Parameters:
 	- gecco_precomputed_dir: Directory with per-sample subdirectories of precomputed GECCO results.
-	- sample_genomes: Dictionary mapping sample names to lsaBGC-Pan's gene-called full genome GenBank files.
+	- sample_genomes: Dictionary mapping sample names to the full genome GenBank files used by lsaBGC-Pan.
 	- gecco_results_dir: Directory where recreated BGC GenBank files will be written (in per-sample subdirectories).
 	- logObject: A python logging object.
+	- original_genomes (optional): Dictionary mapping sample names to the original antiSMASH full genome GenBank files
+	                               (prior to lsaBGC-Pan adding locus tags) to look up original sequence identifiers.
 	********************************************************************************************************************
 	Returns:
 	- gecco_bgc_locations: List of BGC location information lists: [bgc_file, sample, scaffold, start, end,
@@ -1861,16 +1895,21 @@ def processPrecomputedGECCOResults(gecco_precomputed_dir, sample_genomes, gecco_
 			for tc in [' ', '\t', ',', '|', '\\']:
 				sample = sample.replace(tc, '_')
 			sample = cleanUpSampleName(sample)
+			# antiSMASH sample names are the (uncleaned) names of the results subdirectories, so check these first.
+			if sd in sample_genomes:
+				sample = sd
 			if sample in sample_genomes:
+				if sample in sample_to_gecco_dir:
+					raise RuntimeError('Multiple precomputed GECCO results subdirectories correspond to sample %s: %s and %s' % (sample, sample_to_gecco_dir[sample], subdir))
 				sample_to_gecco_dir[sample] = subdir
 			else:
-				msg = 'Warning: precomputed GECCO results subdirectory %s does not match any input genome sample name - ignoring it.' % subdir
+				msg = 'Warning: precomputed GECCO results subdirectory %s does not match any input sample name - ignoring it.' % subdir
 				sys.stderr.write(msg + '\n')
 				logObject.warning(msg)
 
 		missing_samples = sorted([s for s in sample_genomes if not s in sample_to_gecco_dir])
 		if len(missing_samples) > 0:
-			raise RuntimeError('No precomputed GECCO results subdirectory found for the following samples (subdirectory names must match genome FASTA file names minus extension): %s' % ', '.join(missing_samples))
+			raise RuntimeError('No precomputed GECCO results subdirectory found for the following samples (subdirectory names must match genome FASTA file names minus extension, or antiSMASH results subdirectory names if antiSMASH results were provided): %s' % ', '.join(missing_samples))
 
 		for sample in sorted(sample_genomes):
 			gecco_dir = sample_to_gecco_dir[sample]
@@ -1883,6 +1922,20 @@ def processPrecomputedGECCOResults(gecco_precomputed_dir, sample_genomes, gecco_
 			with open(sample_genomes[sample]) as ogg:
 				for rec in SeqIO.parse(ogg, 'genbank'):
 					scaffold_recs[rec.id] = rec
+
+			# map original sequence identifiers (as used by GECCO) to identifiers of records renamed by antiSMASH.
+			scaffold_aliases = {}
+			alias_gbks = [sample_genomes[sample]]
+			if original_genomes != None and sample in original_genomes and \
+					os.path.abspath(original_genomes[sample]) != os.path.abspath(sample_genomes[sample]):
+				alias_gbks.append(original_genomes[sample])
+			for alias_gbk in alias_gbks:
+				for original_id, current_id in getAntiSMASHOriginalScaffoldIDs(alias_gbk).items():
+					if current_id in scaffold_recs and not original_id in scaffold_recs:
+						scaffold_aliases[original_id] = current_id
+			if len(scaffold_aliases) > 0:
+				msg = 'Using original sequence identifiers recorded by antiSMASH to match %d renamed scaffolds for sample %s to precomputed GECCO results.' % (len(scaffold_aliases), sample)
+				logObject.info(msg)
 
 			sample_outdir = gecco_results_dir + sample + '/'
 			setupReadyDirectory([sample_outdir])
@@ -1898,8 +1951,10 @@ def processPrecomputedGECCOResults(gecco_precomputed_dir, sample_genomes, gecco_
 					scaff, bgc_id = ls[0], ls[1]
 					start_coord, end_coord = sorted([int(ls[2]), int(ls[3])])
 					bgc_type = row.get('type', 'Unknown')
+					if not scaff in scaffold_recs and scaff in scaffold_aliases:
+						scaff = scaffold_aliases[scaff]
 					if not scaff in scaffold_recs:
-						raise RuntimeError('Scaffold %s (from %s) not found in genome for sample %s - please make sure GECCO was run on the same genome FASTA file provided to lsaBGC-Pan.' % (scaff, cluster_tsv, sample))
+						raise RuntimeError('Scaffold %s (from %s) not found in genome for sample %s - please make sure GECCO was run on the same genome assembly provided to lsaBGC-Pan (as a FASTA file or via antiSMASH results).' % (scaff, cluster_tsv, sample))
 					genome_rec = scaffold_recs[scaff]
 					scaff_seq = str(genome_rec.seq).upper()
 
@@ -1912,7 +1967,7 @@ def processPrecomputedGECCOResults(gecco_precomputed_dir, sample_genomes, gecco_
 						window_start = max(0, start_coord - 1 - 10)
 						idx = scaff_seq.find(gecco_seq, window_start, min(len(scaff_seq), end_coord + 10))
 						if idx == -1:
-							raise RuntimeError('Sequence of GECCO BGC %s does not match the expected region (%s:%d-%d) in the genome for sample %s - please make sure GECCO was run on the same genome FASTA file provided to lsaBGC-Pan.' % (gecco_gbk, scaff, start_coord, end_coord, sample))
+							raise RuntimeError('Sequence of GECCO BGC %s does not match the expected region (%s:%d-%d) in the genome for sample %s - please make sure GECCO was run on the same genome assembly provided to lsaBGC-Pan.' % (gecco_gbk, scaff, start_coord, end_coord, sample))
 						start_coord = idx + 1
 						end_coord = idx + len(gecco_seq)
 						for feat in gecco_rec.features:
@@ -1923,20 +1978,26 @@ def processPrecomputedGECCOResults(gecco_precomputed_dir, sample_genomes, gecco_
 						sys.stderr.write(msg + '\n')
 						logObject.warning(msg)
 
-					# extend boundaries to fully encompass CDS features from lsaBGC-Pan gene calling which overlap the
-					# region partially (gene calls can differ slightly from GECCO's internal gene calling).
+					# extend boundaries to fully encompass CDS features (from lsaBGC-Pan gene calling or antiSMASH) which
+					# overlap the region partially (gene calls can differ slightly from GECCO's internal gene calling).
+					# Only CDS features with at least half of their length within the region (or which cover at least
+					# half of the region) are considered, so that neighboring genes which merely overlap the region's
+					# boundaries by a few bases are not pulled in.
 					cds_features = []
 					region_start, region_end = start_coord - 1, end_coord
+					gecco_region_length = end_coord - (start_coord - 1)
 					for feat in genome_rec.features:
 						if feat.type != 'CDS': continue
 						fstart, fend = int(feat.location.start), int(feat.location.end)
-						if fend <= start_coord - 1 or fstart >= end_coord: continue
+						overlap = min(fend, end_coord) - max(fstart, start_coord - 1)
+						if overlap <= 0: continue
+						if overlap < 0.5 * (fend - fstart) and overlap < 0.5 * gecco_region_length: continue
 						cds_features.append(feat)
 						region_start = min(region_start, fstart)
 						region_end = max(region_end, fend)
 
 					if len(cds_features) == 0:
-						msg = 'Warning: no CDS features from lsaBGC-Pan gene calling found within GECCO BGC %s for sample %s - skipping it.' % (bgc_id, sample)
+						msg = 'Warning: no CDS features (with at least half their length inside) found within GECCO BGC %s for sample %s - skipping it.' % (bgc_id, sample)
 						sys.stderr.write(msg + '\n')
 						logObject.warning(msg)
 						continue
