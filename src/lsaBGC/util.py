@@ -1913,7 +1913,14 @@ def processPrecomputedGECCOResults(gecco_precomputed_dir, sample_genomes, gecco_
 
 		for sample in sorted(sample_genomes):
 			gecco_dir = sample_to_gecco_dir[sample]
-			cluster_tsvs = [f for f in os.listdir(gecco_dir) if f.endswith('.clusters.tsv')]
+			gecco_files = os.listdir(gecco_dir)
+			cluster_tsvs = [f for f in gecco_files if f.endswith('.clusters.tsv')]
+			if len(cluster_tsvs) == 0 and any(f.endswith('.genes.tsv') or f.endswith('.features.tsv') for f in gecco_files):
+				# GECCO does not write a clusters table when no BGCs are found in a genome.
+				msg = 'No BGCs were predicted by GECCO for sample %s (no *.clusters.tsv file in %s).' % (sample, gecco_dir)
+				sys.stderr.write(msg + '\n')
+				logObject.info(msg)
+				continue
 			if len(cluster_tsvs) != 1:
 				raise RuntimeError('Expected exactly one *.clusters.tsv file in precomputed GECCO results subdirectory %s, found %d.' % (gecco_dir, len(cluster_tsvs)))
 			cluster_tsv = gecco_dir + cluster_tsvs[0]
